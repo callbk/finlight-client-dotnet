@@ -1,6 +1,7 @@
 # finlight .NET Client
 
 Official .NET client for the [finlight.me](https://finlight.me) financial news API.
+Full API documentation: [docs.finlight.me](https://docs.finlight.me)
 
 ## Features
 
@@ -231,6 +232,7 @@ FINLIGHT_API_KEY=... dotnet test       # + integration tests against the live AP
 
 ## Support
 
+- 📖 [Documentation](https://docs.finlight.me)
 - 📧 info@finlight.me
 - 🐛 [GitHub Issues](https://github.com/callbk/finlight-client-dotnet/issues)
 - 🌐 [finlight.me](https://finlight.me)
