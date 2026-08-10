@@ -4,9 +4,15 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC for NuGet trusted publishing
     steps:
       - uses: actions/checkout@v4
 
@@ -25,9 +31,18 @@ jobs:
           dotnet pack src/Finlight.Client -c Release -o out
           -p:Version=$VERSION -p:ContinuousIntegrationBuild=true
 
+      # Exchanges the workflow's OIDC token for a short-lived API key.
+      # Requires a trusted publishing policy on nuget.org for
+      # callbk/finlight-client-dotnet with this workflow file.
+      - name: NuGet login (trusted publishing)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: callbk # nuget.org profile that owns the publishing policy
+
       - name: Push to NuGet
         run: >
           dotnet nuget push "out/*.nupkg"
-          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
