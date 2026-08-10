@@ -1,0 +1,10 @@
+bin/
+obj/
+out/
+*.user
+.vs/
+.idea/
+*.nupkg
+*.snupkg
+TestResults/
+local/
