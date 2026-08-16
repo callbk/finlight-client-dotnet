@@ -1,5 +1,7 @@
 # finlight .NET Client
 
+*English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md)*
+
 Official .NET client for the [finlight.me](https://finlight.me) financial news API.
 Full API documentation: [docs.finlight.me](https://docs.finlight.me)
 
