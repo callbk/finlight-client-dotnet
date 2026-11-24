@@ -2,11 +2,63 @@ name: test
 
 on:
   push:
-    branches: [main]
+    branches: [main, v3]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   test:
+    name: test (${{ matrix.tfm }}, ${{ matrix.culture }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tfm: net8.0       # oldest supported runtime
+            culture: en_US.UTF-8
+          - tfm: net10.0
+            culture: tr_TR.UTF-8 # a culture that breaks naive formatting
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Contract kit matches its MANIFEST
+        run: scripts/sync-conformance.sh --check
+
+      - name: Vocabulary is generated from the kit
+        run: |
+          python3 scripts/generate-vocabulary.py conformance/vocab.json "$RUNNER_TEMP/Vocabulary.g.cs"
+          diff -u src/Finlight.Client/Vocabulary.g.cs "$RUNNER_TEMP/Vocabulary.g.cs"
+
+      - name: README skeleton and translations
+        run: |
+          python3 scripts/check-readme.py
+          python3 scripts/build-readmes.py
+          git diff --exit-code -- README.zh-CN.md README.ja.md README.ko.md
+
+      - name: Restore
+        run: dotnet restore Finlight.Client.slnx
+
+      - name: Lint
+        run: dotnet format Finlight.Client.slnx --verify-no-changes --no-restore
+
+      - name: Build (library, tests, examples)
+        run: dotnet build Finlight.Client.slnx --no-restore -c Release
+
+      - name: Test (unit, every conformance case, the 5 examples)
+        env:
+          LANG: ${{ matrix.culture }}
+          LC_ALL: ${{ matrix.culture }}
+        run: dotnet test tests/Finlight.Client.Tests --no-build -c Release -f ${{ matrix.tfm }} --logger trx
+
+  package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,14 +67,34 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Restore
-        run: dotnet restore
+      - name: Pack into an empty folder
+        run: |
+          rm -rf out
+          dotnet pack src/Finlight.Client -c Release -o out -p:ContinuousIntegrationBuild=true
 
-      - name: Lint
-        run: dotnet format --verify-no-changes --no-restore
+      - name: Package holds no kit, tests or local files
+        run: |
+          for pkg in out/*.nupkg out/*.snupkg; do
+            echo "== $pkg"; unzip -l "$pkg"
+            if unzip -l "$pkg" | grep -Eiq 'conformance/|local/|tests?/|fixtures/|\.env'; then
+              echo "::error::$pkg contains files that must not ship"; exit 1
+            fi
+          done
 
-      - name: Build
-        run: dotnet build --no-restore -c Release
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Test
-        run: dotnet test --no-build -c Release --logger trx
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: No AI attribution in commits
+        run: |
+          if git log --format=%B | grep -Eiq 'co-authored-by|generated (by|with)|claude|anthropic|chatgpt|copilot'; then
+            echo "::error::a commit message carries AI attribution"; exit 1
+          fi
