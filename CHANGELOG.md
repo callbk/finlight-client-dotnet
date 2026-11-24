@@ -25,8 +25,11 @@ Added:
 - Streams: `StreamAsync` and `RawStreamAsync` as `IAsyncEnumerable<StreamEvent>` with ping, watchdog,
   rotation, reconnects, duplicate filtering and hooks (`OnAdmitted`, `OnReconnect`, `OnError`,
   `OnQuotaWait`). An exhausted WebSocket quota retries every hour by default (`QuotaReconnect`).
-  The 115-minute renewal survives the preempt of its own old connection under `Takeover`, and falls back
-  to closing the old connection first when the plan has no room for a second one.
+  The 115-minute renewal survives the preempt of its own old connection under `Takeover`. A refused or
+  failed renewal dial (for example a plan at its connection limit) closes the old connection, waits for
+  its close and dials again at once without `OnError`; the usual wait applies only when that dial is
+  refused too. The reconnect backoff starts over only after a pong or an article, not on
+  `connection.admitted`.
   `FinlightClient.Dispose()` closes every stream of the client.
 - The SDK's HTTP handlers never follow redirects, so the API key header cannot reach another host.
 - Webhooks: `Webhooks.ConstructEvent` and `Webhooks.VerifySignature`; a correctly signed v2 body is a

@@ -203,55 +203,159 @@ public sealed class StreamRulesTests
         Assert.Equal(PreemptReason.ConnectionLimit, preempted.Reason);
     }
 
-    [Fact]
-    public async Task Rotation_WithoutRoomForASecondConnectionClosesTheOldOneFirst()
+    private const string Quota = """{"message":"WebSocket quota exceeded for this month."}""";
+
+    /// <summary>
+    /// Starts a stream whose first connection is admitted and records, in order, every closed
+    /// connection and every scheduled dial.
+    /// </summary>
+    private static async Task<(StreamProbe Probe, ServerConn First, System.Collections.Concurrent.ConcurrentQueue<string> Order)> AdmittedStreamAsync(WsMock ws)
+    {
+        var probe = new StreamProbe(ws).Start(
+            false, [], Kit.ApiKey, "n", c => c with { RotationInterval = TimeSpan.FromMinutes(2) });
+        var order = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var hooks = probe.Core.Hooks;
+        var scheduled = hooks.OnReconnectScheduled;
+        hooks.OnConnectionClosed = id => order.Enqueue($"closed {id}");
+        hooks.OnReconnectScheduled = (delay, reason) =>
+        {
+            order.Enqueue($"dial {reason.Value}");
+            scheduled?.Invoke(delay, reason);
+        };
+        var first = (await ws.NextDialAsync()).Conn!;
+        await first.NextAsync("subscribe");
+        await first.SendAsync(Admitted);
+        await Wait.ForAsync(() => probe.Admitted.Count == 1, "admitted");
+        return (probe, first, order);
+    }
+
+    [Theory]
+    [InlineData(403, TooMany)] // make-before-break on a plan whose only slot the old connection holds
+    [InlineData(403, Quota)] // quota with QuotaReconnect on does not end the stream
+    [InlineData(403, null)]
+    [InlineData(429, null)]
+    [InlineData(503, null)]
+    public async Task Rotation_RefusedDialClosesTheOldConnectionAndDialsAgainAtOnce(int status, string? body)
     {
         await using var ws = await WsMock.StartAsync();
         ws.DialScript.Enqueue((101, null));
-        ws.DialScript.Enqueue((403, TooMany)); // make-before-break: the old connection holds the only slot
-        ws.DialScript.Enqueue((403, TooMany)); // the server noticed the close a little late
+        ws.DialScript.Enqueue((status, body));
+        var (probe, first, order) = await AdmittedStreamAsync(ws);
+        await using var probeScope = probe;
+
+        await probe.AdvanceAsync(TimeSpan.FromMinutes(2));
+        Assert.Null((await ws.NextDialAsync("the refused rotation dial")).Conn);
+        var second = (await ws.NextDialAsync("the redial")).Conn!;
+        Assert.True(first.Closed.IsCompleted);
+        Assert.Equal(1000, first.CloseStatus);
+        await second.NextAsync("re-subscribe", skipPings: true);
+        await second.SendAsync(Admitted);
+        await Wait.ForAsync(() => probe.Reconnects.Count == 1, "onReconnect");
+
+        // The old connection closed (with its close reply) before the redial, which went out at once.
+        Assert.Equal(["dial rotation", "closed 2", "closed 1", "dial rotation"], order.Take(4));
+        Assert.Equal(TimeSpan.Zero, probe.Scheduled[^1].Delay);
+        Assert.Equal(ReconnectReason.Rotation, probe.Reconnects[0].Reason);
+        Assert.Empty(probe.Errors);
+        Assert.Empty(probe.QuotaWaits);
+        Assert.False(probe.Done);
+
+        // The next rotation is make-before-break again: it dials while the live connection is open.
+        await probe.AdvanceAsync(TimeSpan.FromMinutes(2));
+        var third = (await ws.NextDialAsync("the next rotation's dial")).Conn!;
+        await third.NextAsync("re-subscribe", skipPings: true);
+        Assert.True(second.Open);
+        await third.SendAsync(Admitted);
+        await second.Closed.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Empty(probe.Errors);
+    }
+
+    [Fact]
+    public async Task Rotation_ASecondRefusalGetsTheUsualLongWait()
+    {
+        await using var ws = await WsMock.StartAsync();
+        ws.DialScript.Enqueue((101, null));
+        ws.DialScript.Enqueue((403, TooMany));
+        ws.DialScript.Enqueue((403, TooMany)); // the redial after the close is refused too
+        var (probe, first, _) = await AdmittedStreamAsync(ws);
+        await using var probeScope = probe;
+
+        await probe.AdvanceAsync(TimeSpan.FromMinutes(2));
+        Assert.Null((await ws.NextDialAsync("the refused rotation dial")).Conn);
+        Assert.Null((await ws.NextDialAsync("the refused redial")).Conn);
+        await Wait.ForAsync(() => probe.Scheduled.Count == 3, "the long wait");
+        Assert.Equal(ReconnectReason.ConnectionLimit, probe.Scheduled[2].Reason);
+        Assert.True(probe.Scheduled[2].Delay >= TimeSpan.FromSeconds(60));
+        Assert.Equal(1000, first.CloseStatus);
+        var error = Assert.IsType<ForbiddenException>(Assert.Single(probe.Errors));
+        Assert.Equal(403, error.Status);
+        Assert.False(probe.Done);
+    }
+
+    [Theory]
+    [InlineData(401, null)]
+    [InlineData(403, Quota)]
+    public async Task Rotation_ARefusalThatEndsTheStreamStillEndsIt(int status, string? body)
+    {
+        await using var ws = await WsMock.StartAsync();
+        ws.DialScript.Enqueue((101, null));
+        ws.DialScript.Enqueue((status, body));
         await using var probe = new StreamProbe(ws).Start(
-            false, [], Kit.ApiKey, "n", c => c with { RotationInterval = TimeSpan.FromMinutes(2) });
+            false, [], Kit.ApiKey, "n", c => c with { RotationInterval = TimeSpan.FromMinutes(2), QuotaReconnect = false });
         var first = (await ws.NextDialAsync()).Conn!;
         await first.NextAsync("subscribe");
         await first.SendAsync(Admitted);
         await Wait.ForAsync(() => probe.Admitted.Count == 1, "admitted");
 
         await probe.AdvanceAsync(TimeSpan.FromMinutes(2));
-        Assert.Null((await ws.NextDialAsync("the refused rotation dial")).Conn);
-        await first.Closed.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(1000, first.CloseStatus);
+        await Wait.ForAsync(() => probe.Done, "the terminal error");
+        Assert.IsAssignableFrom<FinlightApiException>(probe.Terminal);
+        Assert.Equal(2, ws.DialCount);
+    }
 
-        // Two quiet short retries, no error report, no long backoff.
-        await Wait.ForAsync(() => probe.Scheduled.Count == 2, "the reconnect after the close");
-        Assert.Equal(ReconnectReason.Rotation, probe.Scheduled[1].Reason);
-        Assert.True(probe.Scheduled[1].Delay < TimeSpan.FromSeconds(5));
-        await probe.AdvanceAsync(probe.Scheduled[1].Delay);
-        Assert.Null((await ws.NextDialAsync("the late-refused redial")).Conn);
-        await Wait.ForAsync(() => probe.Scheduled.Count == 3, "a quiet retry");
-        Assert.Equal(ReconnectReason.Rotation, probe.Scheduled[2].Reason);
-        Assert.True(probe.Scheduled[2].Delay < TimeSpan.FromSeconds(5));
-        await probe.AdvanceAsync(probe.Scheduled[2].Delay);
-        var second = (await ws.NextDialAsync("the redial")).Conn!;
-        await second.NextAsync("re-subscribe", skipPings: true);
-        await second.SendAsync(Admitted);
-        await Wait.ForAsync(() => probe.Reconnects.Count == 1, "onReconnect");
-        Assert.Equal(ReconnectReason.Rotation, probe.Reconnects[0].Reason);
-        Assert.Empty(probe.Errors);
-        Assert.False(probe.Done);
+    private const string SearchFailed = """{"event":"connection.error","payloadVersion":3,"data":{"code":"SEARCH_FAILED","message":"m"}}""";
 
-        // The next rotation closes first and never dials a second connection next to the live one.
-        var dials = ws.DialCount;
-        await probe.AdvanceAsync(TimeSpan.FromMinutes(2) - TimeSpan.FromMilliseconds(1));
-        Assert.Equal(dials, ws.DialCount);
-        await probe.AdvanceAsync(TimeSpan.FromMilliseconds(1));
-        await second.Closed.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(dials, ws.DialCount);
-        await Wait.ForAsync(() => probe.Scheduled.Count == 4, "the reconnect of the second rotation");
-        await probe.AdvanceAsync(probe.Scheduled[3].Delay);
-        var third = (await ws.NextDialAsync("the second rotation's dial")).Conn!;
-        await third.NextAsync("re-subscribe", skipPings: true);
-        Assert.Empty(probe.Errors);
+    [Fact]
+    public async Task Backoff_AdmittedDoesNotResetIt_APongOrAnArticleDoes()
+    {
+        await using var ws = await WsMock.StartAsync();
+        await using var probe = new StreamProbe(ws).Start(false, [], Kit.ApiKey, "n", c => c with { Random = () => 1.0 });
+
+        // Each connection: admitted, then what the server sends after it, then the reconnect.
+        string[][] connections =
+        [
+            [SearchFailed],
+            [SearchFailed],
+            [SearchFailed],
+            ["""{"action":"pong","t":1,"serverNow":1}""", "close"],
+            [SearchFailed],
+            [Article("a"), "close"],
+        ];
+        for (var i = 0; i < connections.Length; i++)
+        {
+            var conn = (await ws.NextDialAsync()).Conn!;
+            await conn.NextAsync("subscribe", skipPings: true);
+            await conn.SendAsync(Admitted);
+            foreach (var frame in connections[i])
+            {
+                if (frame == "close")
+                {
+                    await conn.CloseAsync();
+                }
+                else
+                {
+                    await conn.SendAsync(frame);
+                }
+            }
+
+            await Wait.ForAsync(() => probe.Scheduled.Count == i + 1, "the reconnect");
+            await probe.AdvanceAsync(probe.Scheduled[i].Delay);
+        }
+
+        // admitted -> SEARCH_FAILED backs off (1, 2, 4 s); a pong and an article start over at 1 s.
+        Assert.Equal(
+            new[] { 1, 2, 4, 1, 2, 1 }.Select(s => TimeSpan.FromSeconds(s)),
+            probe.Scheduled.Select(s => s.Delay));
     }
 
     [Fact]

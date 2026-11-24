@@ -174,9 +174,10 @@ Limits to know:
 - Your plan's connection limit is shared by enriched, raw and older SDK connections. A new connection
   while the limit is reached is refused; the SDK retries after 60 s. Set `Takeover = true` in
   `StreamOptions` to replace the oldest connection instead.
-- The 115-minute renewal opens the new connection before it closes the old one. When your limit leaves
-  no room for that second connection and `Takeover` is off, the SDK closes the old connection first and
-  then connects (a gap of about a second), for this and every later renewal of that stream.
+- The 115-minute renewal opens the new connection before it closes the old one. When that second
+  connection is refused or fails (for example because your limit leaves no room for it and `Takeover`
+  is off), the SDK closes the old connection, waits for its close and connects again at once (a short
+  gap, no `OnError`). Only when that connection is refused too does the usual wait apply.
 - Right after subscribing, the server sends the newest matching article once (also after every
   reconnect). It can be old.
 - Live frames over 32,000 bytes are dropped by the server without notice. This can happen with

@@ -39,10 +39,6 @@ internal sealed class StreamCore
     private static readonly TimeSpan CloseGrace = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(10);
 
-    // Quiet retries of a connect refused for the connection limit right after a rotation closed the old
-    // connection: the server may notice that close a little late.
-    private const int RotationGraceDials = 3;
-
     private readonly FinlightConfig _cfg;
     private readonly ILogger _log;
     private readonly TimeProvider _time;
@@ -70,8 +66,6 @@ internal sealed class StreamCore
     private int _quotaWaits;
     private int _searchFailed;
     private int _connections;
-    private int _rotationGrace;
-    private bool _breakBeforeMake;
     private volatile bool _ended;
     private int _pending;
 
@@ -249,17 +243,8 @@ internal sealed class StreamCore
                 if (rotation.Conn == _current && rotation.Conn.Planned is null)
                 {
                     _log.LogInformation("stream: rotating the connection before the 2 h gateway limit");
-                    if (_breakBeforeMake)
-                    {
-                        // The plan has no room for a second connection: close first, then connect.
-                        _rotationGrace = RotationGraceDials;
-                        Drop(rotation.Conn, Planned.Reconnect(ReconnectReason.Rotation, DelayKind.Backoff), graceful: true);
-                    }
-                    else
-                    {
-                        Hooks.OnReconnectScheduled?.Invoke(TimeSpan.Zero, ReconnectReason.Rotation);
-                        StartDial(ReconnectReason.Rotation, first: false);
-                    }
+                    Hooks.OnReconnectScheduled?.Invoke(TimeSpan.Zero, ReconnectReason.Rotation);
+                    StartDial(ReconnectReason.Rotation, first: false);
                 }
 
                 break;
@@ -457,18 +442,16 @@ internal sealed class StreamCore
         }
 
         _current = null;
-        if (_rotatingFrom is { } rotatingFrom && conn.Planned is null && IsTooManyRefusal(conn))
+        if (_rotatingFrom is { } rotatingFrom && conn.Planned is null && !conn.Opened && !DialFailureEndsStream(conn))
         {
-            // Rotation without takeover on a plan whose connection limit is reached (often a limit of 1):
-            // the new connection was refused because the old one still holds the slot. That is expected,
-            // not an error: close the old connection first, then connect (break-before-make), now and
-            // for every later rotation of this stream.
-            _log.LogInformation("stream: no room for a second connection during rotation; closing the old connection first");
+            // The dial of a rotation was refused or failed while the old connection still works. On a
+            // plan at its connection limit (often a limit of 1) the old connection holds the slot, so a
+            // refusal is expected and not an error: close the old connection, wait for its close and
+            // dial again at once. Only when that dial fails too does the usual wait apply.
+            _log.LogInformation("stream: the rotation dial failed; closing the old connection and dialing again");
             _rotatingFrom = null;
-            _breakBeforeMake = true;
-            _rotationGrace = RotationGraceDials;
             _current = rotatingFrom;
-            Drop(rotatingFrom, Planned.Reconnect(ReconnectReason.Rotation, DelayKind.Backoff), graceful: true);
+            Drop(rotatingFrom, Planned.Reconnect(ReconnectReason.Rotation, DelayKind.Now), graceful: true);
             return;
         }
 
@@ -519,15 +502,6 @@ internal sealed class StreamCore
 
                 if (text.StartsWith(TooManyPrefix, StringComparison.Ordinal))
                 {
-                    if (_rotationGrace > 0)
-                    {
-                        // Right after a rotation closed the old connection the server may not have seen
-                        // that close yet: retry quietly with a short backoff a few times.
-                        _rotationGrace--;
-                        _log.LogDebug("stream: connection limit still reached after closing the old connection; retrying");
-                        return Planned.Reconnect(ReconnectReason.Rotation, DelayKind.Backoff);
-                    }
-
                     Report(DialError(
                         refusal,
                         message,
@@ -814,12 +788,14 @@ internal sealed class StreamCore
         {
             case FrameType.Pong:
                 conn.Watchdog?.Change(_cfg.WatchdogTimeout, Timeout.InfiniteTimeSpan);
+                // The connection works: the reconnect backoff starts over.
+                _failures = 0;
                 Hooks.OnPong?.Invoke();
                 break;
             case FrameType.Admitted:
-                _failures = 0;
+                // Admitted comes before the subscribe is checked and the initial search runs, so it
+                // does not reset the reconnect backoff; a pong or an article does.
                 _quotaWaits = 0;
-                _rotationGrace = 0;
                 if (conn == _current && _rotatingFrom is { } old)
                 {
                     _rotatingFrom = null;
@@ -907,6 +883,7 @@ internal sealed class StreamCore
     private void HandleArticle(DecodedFrame frame, string text)
     {
         _searchFailed = 0;
+        _failures = 0;
         Article article;
         try
         {
@@ -1005,9 +982,19 @@ internal sealed class StreamCore
             },
             kindFromStatus: true);
 
-    private static bool IsTooManyRefusal(Conn conn)
-        => conn.Refusal is { Status: 403 } refusal
-            && (RefusalMessage(refusal.Body) ?? string.Empty).StartsWith(TooManyPrefix, StringComparison.Ordinal);
+    /// <summary>True for a dial failure that ends the stream (as <see cref="Classify"/> decides), without side effects.</summary>
+    private bool DialFailureEndsStream(Conn conn)
+    {
+        if (conn.Refusal is not { } refusal)
+        {
+            return conn.DialError is ObjectDisposedException || _connector.Disposed;
+        }
+
+        var text = RefusalMessage(refusal.Body) ?? string.Empty;
+        return refusal.Status == 401
+            || (refusal.Status == 403 && text.StartsWith(NoWebSocketsPrefix, StringComparison.Ordinal))
+            || (refusal.Status == 403 && text.StartsWith(QuotaPrefix, StringComparison.Ordinal) && !_cfg.QuotaReconnect);
+    }
 
     private static string? RefusalMessage(string? body)
     {
