@@ -141,7 +141,10 @@ public sealed record ArticleSource : IJsonOnDeserialized
     [JsonPropertyName("domain")]
     public required string Domain { get; init; }
 
-    /// <summary><c>type</c>: always null today.</summary>
+    /// <summary>
+    /// <c>type</c>: the source type when the article was indexed (open vocabulary). Null when the source is not
+    /// classified or the article was indexed before source types existed; can lag <see cref="Source.Type"/> after a reclassification.
+    /// </summary>
     [JsonPropertyName("type")]
     public SourceType? Type { get; init; }
 
@@ -321,11 +324,11 @@ public sealed record Source : IJsonOnDeserialized
     [JsonPropertyName("domain")]
     public required string Domain { get; init; }
 
-    /// <summary><c>name</c>: null until the catalog is curated.</summary>
+    /// <summary><c>name</c>: display name; null when the source has none.</summary>
     [JsonPropertyName("name")]
     public string? Name { get; init; }
 
-    /// <summary><c>type</c>: null today.</summary>
+    /// <summary><c>type</c>: the source type (open vocabulary); null when the source is not classified.</summary>
     [JsonPropertyName("type")]
     public SourceType? Type { get; init; }
 

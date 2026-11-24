@@ -29,6 +29,8 @@ public sealed class VocabularyTests
         Assert.Equal(Values(vocab["request"]!["minImportance"]), ImportanceValues.All);
         Assert.Equal(Values(vocab["response"]!["importance"]), ImportanceValues.All);
         Assert.Equal(Values(vocab["response"]!["sentimentLabels"]), SentimentLabelValues.All);
+        Assert.Equal(Values(vocab["request"]!["sourceTypes"]), SourceTypeValues.All);
+        Assert.Equal(Values(vocab["request"]!["excludeSourceTypes"]), SourceTypeValues.All);
         Assert.Equal(Values(vocab["response"]!["sourceTypes"]), SourceTypeValues.All);
         Assert.Equal(Values(vocab["websocket"]!["events"]), StreamEventNameValues.All);
         Assert.Equal(Values(vocab["websocket"]!["articleEvents"]), StreamEventNameValues.ArticleEvents);

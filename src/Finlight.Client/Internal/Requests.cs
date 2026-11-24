@@ -21,6 +21,8 @@ internal static class Requests
         AddList(body, "sources", p.Sources);
         AddList(body, "optInSources", p.OptInSources);
         AddList(body, "excludeSources", p.ExcludeSources);
+        AddList(body, "sourceTypes", p.SourceTypes?.Select(r => r.Value).ToList());
+        AddList(body, "excludeSourceTypes", p.ExcludeSourceTypes?.Select(r => r.Value).ToList());
         if (p.From is { } from)
         {
             body["from"] = from.Format("from");

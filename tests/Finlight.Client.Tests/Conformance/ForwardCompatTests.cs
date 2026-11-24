@@ -37,6 +37,7 @@ public sealed class ForwardCompatTests
                     var fixture = Kit.Obj("fixtures/forward-compat/unknown-enum-values.json");
                     var article = Presence.Article(fixture["wire"]!);
                     Assert.Equal("wire_service", article.Source.Type!.Value.Value);
+                    Assert.False(article.Source.Type!.Value.IsKnown);
                     Assert.Equal("mixed", article.Sentiment.Value!.Label!.Value.Value);
                     Assert.False(article.Sentiment.Value!.Label!.Value.IsKnown);
                     Assert.Equal("guarantor", article.Companies.Value![0].Role!.Value.Value);

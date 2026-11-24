@@ -55,6 +55,7 @@ var page = await client.Articles.SearchAsync(new SearchParams
     Languages = ["en", "de"],
     From = new DateOnly(2026, 11, 1),          // string, DateOnly, DateTimeOffset or a UTC/local DateTime
     EventTypes = [EventType.Mna],
+    ExcludeSourceTypes = [SourceType.PressRelease],
     MinRelevance = 0.5,
     OrderBy = OrderBy.AvailableAt,
     Include = [IncludeBlock.Content, IncludeBlock.Companies, IncludeBlock.Events],
@@ -125,6 +126,8 @@ Some keys depend on your plan or on `include`. They have up to three states, kep
   Use `CompaniesPresent` and `EventsPresent`. `[]` never means "not entitled".
 - `EventTag.CompanyIds` is absent unless `companies` is in the same answer.
 - `Source.HasContent` is absent without `fullArticleAccess`: unknown, not "no content".
+- `article.Source.Type` and `Source.Type` are `null` when the source is not classified. `SourceTypes` never
+  matches such articles and `ExcludeSourceTypes` keeps them.
 - Timestamps stay the strings that were sent (`PublishedAt`). `PublishedAtTime` and the other `...Time`
   properties parse them strictly (RFC 3339) and return `null` for anything unreadable.
 - Unknown keys from newer servers are ignored. `article.GetRawJson()` gives the JSON as received.

@@ -636,7 +636,7 @@ public static class SentimentLabelValues
 }
 
 /// <summary>
-/// The type of a source (<c>source.type</c>, <c>/v3/sources</c> <c>type</c>); always null today. An open vocabulary: any string is kept as sent; the static members are the values known
+/// The type of a source (<c>source.type</c>, <c>/v3/sources</c> <c>type</c>, request <c>sourceTypes</c> and <c>excludeSourceTypes</c>). An open vocabulary: any string is kept as sent; the static members are the values known
 /// to this SDK version. Compare by value (<c>==</c>); for <c>switch</c> use the constants in <see cref="SourceTypeValues"/>.
 /// </summary>
 [JsonConverter(typeof(OpenEnumConverter<SourceType>))]
@@ -658,6 +658,27 @@ public readonly record struct SourceType : IOpenEnum<SourceType>
     /// <summary>True when the value is one of <see cref="SourceTypeValues.All"/>.</summary>
     public bool IsKnown => SourceTypeValues.All.Contains(Value);
 
+    /// <summary><c>newswire</c></summary>
+    public static SourceType Newswire { get; } = new(SourceTypeValues.Newswire);
+
+    /// <summary><c>press_release</c></summary>
+    public static SourceType PressRelease { get; } = new(SourceTypeValues.PressRelease);
+
+    /// <summary><c>financial_media</c></summary>
+    public static SourceType FinancialMedia { get; } = new(SourceTypeValues.FinancialMedia);
+
+    /// <summary><c>general_media</c></summary>
+    public static SourceType GeneralMedia { get; } = new(SourceTypeValues.GeneralMedia);
+
+    /// <summary><c>aggregator</c></summary>
+    public static SourceType Aggregator { get; } = new(SourceTypeValues.Aggregator);
+
+    /// <summary><c>blog</c></summary>
+    public static SourceType Blog { get; } = new(SourceTypeValues.Blog);
+
+    /// <summary><c>government</c></summary>
+    public static SourceType Government { get; } = new(SourceTypeValues.Government);
+
     /// <summary>Wraps a string.</summary>
     /// <param name="value">The wire value.</param>
     public static implicit operator SourceType(string value) => new(value);
@@ -675,8 +696,29 @@ public readonly record struct SourceType : IOpenEnum<SourceType>
 /// <summary>The known values of <see cref="SourceType"/> as <c>const string</c>, for <c>switch</c>.</summary>
 public static class SourceTypeValues
 {
+    /// <summary><c>newswire</c></summary>
+    public const string Newswire = "newswire";
+
+    /// <summary><c>press_release</c></summary>
+    public const string PressRelease = "press_release";
+
+    /// <summary><c>financial_media</c></summary>
+    public const string FinancialMedia = "financial_media";
+
+    /// <summary><c>general_media</c></summary>
+    public const string GeneralMedia = "general_media";
+
+    /// <summary><c>aggregator</c></summary>
+    public const string Aggregator = "aggregator";
+
+    /// <summary><c>blog</c></summary>
+    public const string Blog = "blog";
+
+    /// <summary><c>government</c></summary>
+    public const string Government = "government";
+
     /// <summary>Every value known to this SDK version.</summary>
-    public static IReadOnlyList<string> All { get; } = [];
+    public static IReadOnlyList<string> All { get; } = [Newswire, PressRelease, FinancialMedia, GeneralMedia, Aggregator, Blog, Government];
 }
 
 /// <summary>

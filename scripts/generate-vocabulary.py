@@ -21,7 +21,7 @@ types = [
   ("EventDirection", "The direction of an event (<c>events[].direction</c>, request <c>eventDirections</c>).", vocab["response"]["eventDirections"]["values"], {}),
   ("Importance", "The importance of an event (<c>events[].importance</c>, request <c>minImportance</c>); <see cref=\"ImportanceValues.All\"/> is ordered from low to critical.", vocab["response"]["importance"]["values"], {}),
   ("SentimentLabel", "The label of a sentiment (<c>sentiment.label</c>).", vocab["response"]["sentimentLabels"]["values"], {}),
-  ("SourceType", "The type of a source (<c>source.type</c>, <c>/v3/sources</c> <c>type</c>); always null today.", vocab["response"]["sourceTypes"]["values"], {}),
+  ("SourceType", "The type of a source (<c>source.type</c>, <c>/v3/sources</c> <c>type</c>, request <c>sourceTypes</c> and <c>excludeSourceTypes</c>).", vocab["response"]["sourceTypes"]["values"], {}),
   ("StreamEventName", "The <c>event</c> name of a WebSocket frame.", vocab["websocket"]["events"]["values"], {"ArticleEvents": vocab["websocket"]["articleEvents"]["values"], "ConnectionEvents": vocab["websocket"]["connectionEvents"]["values"]}),
   ("ConnectionErrorCode", "The <c>code</c> of a <c>connection.error</c> frame.", vocab["websocket"]["connectionErrorCodes"]["values"], {}),
   ("PreemptReason", "The <c>reason</c> of a <c>connection.preempted</c> frame.", vocab["websocket"]["preemptReasons"]["values"], {}),

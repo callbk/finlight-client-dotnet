@@ -56,6 +56,7 @@ var page = await client.Articles.SearchAsync(new SearchParams
     Languages = ["en", "de"],
     From = new DateOnly(2026, 11, 1),          // string, DateOnly, DateTimeOffset or a UTC/local DateTime
     EventTypes = [EventType.Mna],
+    ExcludeSourceTypes = [SourceType.PressRelease],
     MinRelevance = 0.5,
     OrderBy = OrderBy.AvailableAt,
     Include = [IncludeBlock.Content, IncludeBlock.Companies, IncludeBlock.Events],
@@ -125,6 +126,7 @@ var sources = await client.Sources.ListAsync();
   `CompaniesPresent` と `EventsPresent` を使ってください。`[]` が「権限なし」を意味することはありません。
 - 同じ応答に `companies` がない限り、`EventTag.CompanyIds` は欠落します。
 - `fullArticleAccess` がない場合、`Source.HasContent` は欠落します。「コンテンツなし」ではなく「不明」です。
+- ソースが未分類の場合、`article.Source.Type` と `Source.Type` は `null` です。`SourceTypes` はそのような記事に一致せず、`ExcludeSourceTypes` はそれらを残します。
 - タイムスタンプは送信された文字列のままです（`PublishedAt`）。`PublishedAtTime` などの `...Time` プロパティは
   RFC 3339 で厳密に解析し、読めない値には `null` を返します。
 - 新しいサーバーの未知のキーは無視されます。`article.GetRawJson()` は受信した JSON を返します。

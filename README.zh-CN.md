@@ -56,6 +56,7 @@ var page = await client.Articles.SearchAsync(new SearchParams
     Languages = ["en", "de"],
     From = new DateOnly(2026, 11, 1),          // string, DateOnly, DateTimeOffset or a UTC/local DateTime
     EventTypes = [EventType.Mna],
+    ExcludeSourceTypes = [SourceType.PressRelease],
     MinRelevance = 0.5,
     OrderBy = OrderBy.AvailableAt,
     Include = [IncludeBlock.Content, IncludeBlock.Companies, IncludeBlock.Events],
@@ -124,6 +125,7 @@ var sources = await client.Sources.ListAsync();
   `CompaniesPresent` 和 `EventsPresent`。`[]` 从不表示"无权限"。
 - 除非同一应答中包含 `companies`，否则 `EventTag.CompanyIds` 缺失。
 - 没有 `fullArticleAccess` 时 `Source.HasContent` 缺失：表示未知，而不是"没有内容"。
+- 来源未分类时，`article.Source.Type` 和 `Source.Type` 为 `null`。`SourceTypes` 不会匹配这类文章，`ExcludeSourceTypes` 会保留它们。
 - 时间戳保持发送时的字符串（`PublishedAt`）。`PublishedAtTime` 等 `...Time` 属性严格按 RFC 3339 解析，
   无法读取时返回 `null`。
 - 新服务器的未知键会被忽略。`article.GetRawJson()` 返回收到的原始 JSON。`JsonSerializer.Serialize(article)`

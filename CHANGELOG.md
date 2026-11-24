@@ -14,6 +14,9 @@ Added:
 - REST v3: `Articles.SearchAsync`, `Articles.SearchAllAsync` (frozen body, cursor walk, `MaxPages`),
   `Articles.GetAsync`, `Articles.GetByLinkAsync`, `Companies.SearchAsync`, `Companies.GetManyAsync`,
   `Companies.GetAsync` (ETag revalidation, `IfNoneMatch`), `Sources.ListAsync`.
+- `SearchParams.SourceTypes` and `ExcludeSourceTypes` (search and `SearchAllAsync` only) with the open
+  vocabulary `SourceType` (`newswire`, `press_release`, `financial_media`, `general_media`, `aggregator`,
+  `blog`, `government`). `source.type` and `Source.Type` are `null` for unclassified sources.
 - Models that tolerate new keys and old data: `Optional<T>` for keys that depend on the plan or
   `include` (absent, `null`, value), open vocabularies as `readonly record struct`s with `...Values`
   constants, raw JSON through `GetRawJson()`, strict `...Time` accessors, skipped entries per page.

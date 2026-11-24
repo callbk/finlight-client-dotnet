@@ -115,6 +115,19 @@ public sealed record SearchParams
     [JsonPropertyName("excludeSources")]
     public IReadOnlyList<string>? ExcludeSources { get; init; }
 
+    /// <summary>
+    /// <c>sourceTypes</c>: only articles from sources of these types. Articles of unclassified sources
+    /// (<see cref="ArticleSource.Type"/> null) never match. Filters inside the source pool and never adds a source to it.
+    /// </summary>
+    [JsonPropertyName("sourceTypes")]
+    public IReadOnlyList<SourceType>? SourceTypes { get; init; }
+
+    /// <summary>
+    /// <c>excludeSourceTypes</c>: drop articles from sources of these types. Articles of unclassified sources are kept.
+    /// </summary>
+    [JsonPropertyName("excludeSourceTypes")]
+    public IReadOnlyList<SourceType>? ExcludeSourceTypes { get; init; }
+
     /// <summary><c>from</c>: lower bound on the <see cref="OrderBy"/> timestamp.</summary>
     [JsonPropertyName("from")]
     public DateInput? From { get; init; }

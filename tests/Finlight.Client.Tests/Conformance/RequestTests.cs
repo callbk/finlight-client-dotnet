@@ -109,6 +109,8 @@ public sealed class RequestTests
                 {
                     Assert.All(sources, s => Assert.True(s.HasContent.IsPresent));
                     Assert.Contains(sources, s => s.IsCustom == true);
+                    Assert.Contains(sources, s => s.Type == SourceType.Blog);
+                    Assert.Contains(sources, s => s.Type == SourceType.FinancialMedia);
                 }
                 else
                 {

@@ -56,6 +56,7 @@ var page = await client.Articles.SearchAsync(new SearchParams
     Languages = ["en", "de"],
     From = new DateOnly(2026, 11, 1),          // string, DateOnly, DateTimeOffset or a UTC/local DateTime
     EventTypes = [EventType.Mna],
+    ExcludeSourceTypes = [SourceType.PressRelease],
     MinRelevance = 0.5,
     OrderBy = OrderBy.AvailableAt,
     Include = [IncludeBlock.Content, IncludeBlock.Companies, IncludeBlock.Events],
@@ -125,6 +126,7 @@ var sources = await client.Sources.ListAsync();
   `EventsPresent`를 사용하세요. `[]`가 "권한 없음"을 뜻하는 일은 없습니다.
 - 같은 응답에 `companies`가 없으면 `EventTag.CompanyIds`는 없습니다.
 - `fullArticleAccess`가 없으면 `Source.HasContent`는 없습니다. "콘텐츠 없음"이 아니라 "알 수 없음"입니다.
+- 소스가 분류되지 않았으면 `article.Source.Type`과 `Source.Type`은 `null`입니다. `SourceTypes`는 그런 기사와 일치하지 않고, `ExcludeSourceTypes`는 그런 기사를 유지합니다.
 - 타임스탬프는 전송된 문자열 그대로입니다(`PublishedAt`). `PublishedAtTime` 등 `...Time` 속성은 RFC 3339로 엄격하게
   파싱하며 읽을 수 없으면 `null`을 반환합니다.
 - 새 서버의 알 수 없는 키는 무시됩니다. `article.GetRawJson()`은 받은 JSON을 반환합니다.
