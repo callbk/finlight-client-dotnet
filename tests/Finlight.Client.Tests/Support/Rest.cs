@@ -1,13 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Time.Testing;
 
 namespace Finlight.Tests.Support;
 
 /// <summary>An <see cref="HttpMock"/> plus a client on a fake clock.</summary>
 internal sealed class Rest : IAsyncDisposable
 {
-    private Rest(HttpMock mock, FinlightClient client, FakeTimeProvider clock, FinlightConfig config)
+    private Rest(HttpMock mock, FinlightClient client, RecordingClock clock, FinlightConfig config)
     {
         Mock = mock;
         Client = client;
@@ -19,14 +18,14 @@ internal sealed class Rest : IAsyncDisposable
 
     public FinlightClient Client { get; }
 
-    public FakeTimeProvider Clock { get; }
+    public RecordingClock Clock { get; }
 
     public FinlightConfig Config { get; }
 
     public static async Task<Rest> StartAsync(Func<FinlightConfig, FinlightConfig>? configure = null, string apiKey = Kit.ApiKey)
     {
         var mock = await HttpMock.StartAsync();
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 24, 0, 0, 0, TimeSpan.Zero));
+        var clock = new RecordingClock(new DateTimeOffset(2026, 11, 24, 0, 0, 0, TimeSpan.Zero));
         var config = new FinlightConfig
         {
             ApiKey = apiKey,

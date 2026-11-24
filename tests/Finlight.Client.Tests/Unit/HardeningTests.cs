@@ -25,11 +25,16 @@ public sealed class HardeningTests
     {
         await using var rest = await Rest.StartAsync();
         rest.Mock.Enqueue(Burst(retryAfter), EmptyPage());
-        var started = rest.Clock.GetUtcNow();
-        var page = await rest.RunAsync(() => rest.Client.Articles.SearchAsync(new SearchParams()), TimeSpan.FromSeconds(1));
+        var call = rest.Client.Articles.SearchAsync(new SearchParams());
+
+        // The only timer the call starts is the burst wait; it must be BurstWait, not the header value.
+        var wait = await rest.Clock.NextTimerAsync();
+        Assert.Equal(rest.Config.BurstWait, wait);
+        Assert.Single(rest.Mock.Requests);
+        rest.Clock.Advance(wait);
+        var page = await call.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Empty(page.Articles);
         Assert.Equal(2, rest.Mock.Requests.Count);
-        Assert.True(rest.Clock.GetUtcNow() - started < TimeSpan.FromMinutes(1));
 
         // Without the retry the header is still readable, cut to the timer limit.
         await using var off = await Rest.StartAsync(c => c with { RetryOnBurst = RetryOnBurst.Off });
