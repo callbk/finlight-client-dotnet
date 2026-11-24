@@ -329,7 +329,10 @@ public sealed record LookupOptions
 /// <summary>Options of <c>companies.get</c>.</summary>
 public sealed record CompanyGetOptions
 {
-    /// <summary>Your own ETag. On 304 the call returns null ("not modified"), never an error.</summary>
+    /// <summary>
+    /// Your own ETag from <see cref="CompanyRecord.GetCacheInfo"/>, sent as <c>If-None-Match</c>. On 304 the call
+    /// returns null ("not modified"), never an error. A 304 costs 1 credit too.
+    /// </summary>
     public string? IfNoneMatch { get; init; }
 }
 

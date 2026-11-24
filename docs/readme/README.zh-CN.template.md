@@ -58,9 +58,9 @@ Go 模块 `/v2`、.NET 2.x、Java 1.x、Ruby 1.x、Rust 0.2。
 - 公司查询需要 `entityAccess` 权限（否则为 `ForbiddenException`）。
 - 公司和来源查询与文章请求一样，每个请求消耗 1 个额度（`GetManyAsync` 按请求计 1 个，不按 ID 计）。
   304 重新验证和错误也消耗 1 个额度。与其他调用一样，可能收到 429。
-- `Companies.GetAsync` 会保留最近的记录并用 ETag 重新验证（`CompanyCacheSize`）。使用你自己的
-  `new CompanyGetOptions { IfNoneMatch = etag }` 时，304 应答返回 `null`。`GetCacheInfo()` 提供 `Etag`、
-  `CacheControl` 和 `NotModified`。
+- SDK 不缓存公司记录。`GetCacheInfo()` 提供记录的 `Etag` 和 `CacheControl`。若要节省额度，请自己保存记录，
+  在 `max-age` 内不要再次调用。可以用 `new CompanyGetOptions { IfNoneMatch = etag }` 传回 ETag：304 应答返回 `null`，
+  但同样消耗 1 个额度。不传 `IfNoneMatch` 时，SDK 从不发送 `If-None-Match`。
 - `CompanyList` 和 `SourceList` 是带 `Skipped` 属性的只读列表；`ArticlePage.Skipped` 对搜索页同理。
   无法读取的条目会放在那里并记录警告。
 
@@ -185,7 +185,6 @@ finlight 会对每个 Webhook 签名。请在解析之前用**原始**请求体�
 | `BurstWait` | 10 秒 | 缺少 `Retry-After` 时的突发等待 |
 | `MaxPages` | 10 | `SearchAllAsync` 的页数上限 |
 | `MaxResponseBytes` | 32 MiB | REST 应答的大小上限 |
-| `CompanyCacheSize` | 256 | `Companies.GetAsync` 保留的记录数，0 表示关闭 |
 | `PingInterval` | 25 秒 | 流的 ping |
 | `WatchdogTimeout` | 60 秒 | 这么久没有 pong 就重连 |
 | `RotationInterval` | 115 分钟 | 在 2 小时上限前建立新连接 |

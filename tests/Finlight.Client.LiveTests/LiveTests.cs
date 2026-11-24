@@ -89,10 +89,11 @@ public sealed class LiveTests(Xunit.Abstractions.ITestOutputHelper output)
             if (companies.Count > 0)
             {
                 var record = await client.Companies.GetAsync(companies[0].CompanyId);
-                Assert.NotNull(record!.GetCacheInfo()!.Etag);
-                var again = await client.Companies.GetAsync(companies[0].CompanyId);
-                Assert.True(again!.GetCacheInfo()!.NotModified);
-                output.WriteLine($"companies {companies.Count}; etag revalidated: {again.GetCacheInfo()!.NotModified}");
+                var etag = record!.GetCacheInfo()!.Etag;
+                Assert.NotNull(etag);
+                var again = await client.Companies.GetAsync(companies[0].CompanyId, new CompanyGetOptions { IfNoneMatch = etag });
+                Assert.Null(again);
+                output.WriteLine($"companies {companies.Count}; etag revalidated: {again is null}");
             }
         }
         catch (ForbiddenException)

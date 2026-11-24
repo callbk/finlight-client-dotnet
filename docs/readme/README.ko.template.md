@@ -59,9 +59,10 @@ API의 키 하나에 대응합니다(`OrderBy`는 `orderBy`). 설정한 속성�
 - 기업 조회에는 `entityAccess` 권한이 필요합니다(없으면 `ForbiddenException`).
 - 기업과 소스 조회는 기사 요청처럼 요청마다 1크레딧이 듭니다(`GetManyAsync`는 ID마다가 아니라 요청마다 1).
   304 재검증과 오류도 1크레딧이 듭니다. 다른 호출처럼 429가 올 수 있습니다.
-- `Companies.GetAsync`는 최근 레코드를 보관하고 ETag로 재검증합니다(`CompanyCacheSize`). 직접
-  `new CompanyGetOptions { IfNoneMatch = etag }`를 넘기면 304 응답은 `null`을 반환합니다. `GetCacheInfo()`는
-  `Etag`, `CacheControl`, `NotModified`를 제공합니다.
+- SDK는 기업 레코드를 캐시하지 않습니다. `GetCacheInfo()`는 레코드의 `Etag`와 `CacheControl`을 제공합니다.
+  크레딧을 아끼려면 레코드를 직접 보관하고 `max-age` 동안 다시 호출하지 마세요. ETag는
+  `new CompanyGetOptions { IfNoneMatch = etag }`로 넘길 수 있습니다. 304 응답은 `null`을 반환하지만 이것도 1 크레딧이
+  듭니다. `IfNoneMatch`가 없으면 SDK는 `If-None-Match`를 보내지 않습니다.
 - `CompanyList`와 `SourceList`는 `Skipped` 속성이 있는 읽기 전용 리스트입니다. 검색 페이지의 `ArticlePage.Skipped`도
   같습니다. 읽을 수 없는 항목은 여기에 들어가고 경고로 로그에 남습니다.
 
@@ -193,7 +194,6 @@ finlight는 모든 웹훅에 서명합니다. 무엇이든 파싱하기 전에 *
 | `BurstWait` | 10초 | `Retry-After`가 없을 때의 버스트 대기 |
 | `MaxPages` | 10 | `SearchAllAsync`의 페이지 상한 |
 | `MaxResponseBytes` | 32 MiB | REST 응답의 크기 상한 |
-| `CompanyCacheSize` | 256 | `Companies.GetAsync`가 보관하는 레코드 수, 0이면 끔 |
 | `PingInterval` | 25초 | 스트림 ping |
 | `WatchdogTimeout` | 60초 | 이 시간 동안 pong이 없으면 재연결 |
 | `RotationInterval` | 115분 | 2시간 제한 전에 새 연결 |

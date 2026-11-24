@@ -13,8 +13,10 @@ Added:
   your own `HttpClient` for REST and the WebSocket handshake).
 - REST v3: `Articles.SearchAsync`, `Articles.SearchAllAsync` (frozen body, cursor walk, `MaxPages`),
   `Articles.GetAsync`, `Articles.GetByLinkAsync`, `Companies.SearchAsync`, `Companies.GetManyAsync`,
-  `Companies.GetAsync` (ETag revalidation, `IfNoneMatch`), `Sources.ListAsync`. The company and source
-  lookups cost 1 credit per request, like an article request; a 304 revalidation and errors cost 1 credit too.
+  `Companies.GetAsync` (your own ETag as `IfNoneMatch`, 304 returns `null`; `GetCacheInfo()` gives `Etag`
+  and `CacheControl`), `Sources.ListAsync`. The company and source lookups cost 1 credit per request, like an
+  article request; a 304 revalidation and errors cost 1 credit too. The SDK does not cache company records:
+  to save credits, keep them yourself and do not call again within `max-age`.
 - `SourceTypes` and `ExcludeSourceTypes` on `SearchParams` (search and `SearchAllAsync`), `StreamParams`
   and `RawStreamParams`, with the open vocabulary `SourceType` (`newswire`, `press_release`,
   `financial_media`, `general_media`, `aggregator`, `blog`, `government`). The stream frames carry them
@@ -48,3 +50,6 @@ Removed:
 - Everything of API v1 and v2: `FetchArticlesAsync`, `FetchArticleByLinkAsync`, `GetSourcesAsync`,
   `GetArticlesParams`, the WebSocket clients, `FinlightWebhooks`, `FinlightBlockedException`, the
   closed enums and the global `JsonStringEnumConverter`.
+- Pre-release only (contract kit 3.0.0-rc.6): the SDK's own company cache. `FinlightConfig.CompanyCacheSize`
+  and `CacheInfo.NotModified` are gone; `Companies.GetAsync` sends `If-None-Match` only with your
+  `IfNoneMatch` and never answers a 304 with a stored record.

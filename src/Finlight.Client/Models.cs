@@ -311,11 +311,13 @@ public sealed record CompanyRecord : IJsonOnDeserialized
     void IJsonOnDeserialized.OnDeserialized() => Require.NotNull(Name, "name");
 }
 
-/// <summary>HTTP caching data of a record from <c>companies.get</c>.</summary>
+/// <summary>
+/// HTTP caching data of a record from <c>companies.get</c>. The SDK keeps no cache; this lets you keep the
+/// record yourself.
+/// </summary>
 /// <param name="Etag">The <c>ETag</c> header; pass it as <see cref="CompanyGetOptions.IfNoneMatch"/>.</param>
-/// <param name="CacheControl">The <c>Cache-Control</c> header.</param>
-/// <param name="NotModified">True when the server answered 304 and the SDK returned its cached copy.</param>
-public sealed record CacheInfo(string? Etag, string? CacheControl, bool NotModified);
+/// <param name="CacheControl">The <c>Cache-Control</c> header (how long you may keep the record).</param>
+public sealed record CacheInfo(string? Etag, string? CacheControl);
 
 /// <summary>One source of <c>/v3/sources</c> (SourceV3).</summary>
 public sealed record Source : IJsonOnDeserialized

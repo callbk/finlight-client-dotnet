@@ -150,21 +150,34 @@ public sealed class HardeningTests
     }
 
     [Fact]
-    public async Task CompanyCache_ARevalidationDoesNotChangeEarlierRecords()
+    public async Task CompaniesGet_KeepsNoCacheOfItsOwn()
     {
         await using var rest = await Rest.StartAsync();
         var ok = MockResponse.Json(200, """{"company":{"companyId":7,"name":"Seven"}}""");
-        rest.Mock.Enqueue(
-            ok with { Headers = new Dictionary<string, string>(ok.Headers) { ["etag"] = "\"v1\"" } },
-            new MockResponse(304, new Dictionary<string, string> { ["etag"] = "\"v1\"" }, []));
+        var tagged = ok with { Headers = new Dictionary<string, string>(ok.Headers) { ["etag"] = "\"v1\"" } };
+        rest.Mock.Enqueue(tagged, tagged);
         var first = (await rest.Client.Companies.GetAsync(7))!;
-        Assert.False(first.GetCacheInfo()!.NotModified);
         var second = (await rest.Client.Companies.GetAsync(7))!;
-        Assert.True(second.GetCacheInfo()!.NotModified);
+        Assert.Equal("\"v1\"", first.GetCacheInfo()!.Etag);
         Assert.Equal("Seven", second.Name);
-        Assert.Equal(first.GetRawJson(), second.GetRawJson());
-        Assert.NotSame(first, second);
-        Assert.False(first.GetCacheInfo()!.NotModified);
-        Assert.Equal("\"v1\"", rest.Mock.Requests[1].Header("If-None-Match"));
+        Assert.All(rest.Mock.Requests, r => Assert.False(r.Headers.ContainsKey("If-None-Match")));
+    }
+
+    [Fact]
+    public async Task CompaniesGet_CallerEtagIsSentAndA304ReturnsNull()
+    {
+        await using var rest = await Rest.StartAsync();
+        rest.Mock.Enqueue(new MockResponse(304, new Dictionary<string, string> { ["etag"] = "\"v1\"" }, []));
+        var result = await rest.Client.Companies.GetAsync(7, new CompanyGetOptions { IfNoneMatch = "\"v1\"" });
+        Assert.Null(result);
+        Assert.Equal("\"v1\"", Assert.Single(rest.Mock.Requests).Header("If-None-Match"));
+    }
+
+    [Fact]
+    public async Task CompaniesGet_A304WithoutCallerEtagIsADecodeError()
+    {
+        await using var rest = await Rest.StartAsync();
+        rest.Mock.Enqueue(new MockResponse(304, new Dictionary<string, string>(), []));
+        await Assert.ThrowsAsync<FinlightDecodeException>(() => rest.Client.Companies.GetAsync(7));
     }
 }

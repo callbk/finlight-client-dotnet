@@ -452,7 +452,6 @@ public sealed class RestRulesTests
         Assert.Equal(TimeSpan.FromSeconds(10), defaults.BurstWait);
         Assert.Equal(10, defaults.MaxPages);
         Assert.Equal(32L * 1024 * 1024, defaults.MaxResponseBytes);
-        Assert.Equal(256, defaults.CompanyCacheSize);
         Assert.Equal(TimeSpan.FromSeconds(25), defaults.PingInterval);
         Assert.Equal(TimeSpan.FromSeconds(60), defaults.WatchdogTimeout);
         Assert.Equal(TimeSpan.FromMinutes(115), defaults.RotationInterval);

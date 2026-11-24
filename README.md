@@ -95,8 +95,9 @@ article = await client.Articles.GetByLinkAsync("https://www.reuters.com/...");
 
 var companies = await client.Companies.SearchAsync(new CompanySearchParams { Q = "NVDA", Mic = "XNAS" }); // at most 10, no pages
 companies = await client.Companies.GetManyAsync([4821, 1001]);
-var company = await client.Companies.GetAsync(4821);   // revalidated with its ETag next time
-Console.WriteLine(company?.GetCacheInfo()?.Etag);
+var company = await client.Companies.GetAsync(4821);
+var etag = company?.GetCacheInfo()?.Etag;            // keep the record and its ETag yourself
+var unchanged = await client.Companies.GetAsync(4821, new CompanyGetOptions { IfNoneMatch = etag }); // null on 304
 
 var sources = await client.Sources.ListAsync();
 ```
@@ -106,9 +107,10 @@ var sources = await client.Sources.ListAsync();
 - Company lookups need the `entityAccess` entitlement (`ForbiddenException` otherwise).
 - Company and source lookups cost 1 credit per request (`GetManyAsync` 1 per request, not per id), like
   an article request. A 304 revalidation and errors cost 1 credit too. They can get a 429 like any call.
-- `Companies.GetAsync` keeps the last records and revalidates them with their ETag (`CompanyCacheSize`).
-  With your own `new CompanyGetOptions { IfNoneMatch = etag }`, a 304 answer returns `null`.
-  `GetCacheInfo()` gives `Etag`, `CacheControl` and `NotModified`.
+- The SDK does not cache company records. `GetCacheInfo()` gives `Etag` and `CacheControl` of a record.
+  To save credits, keep the records yourself and do not call again within `max-age`. You can pass the ETag
+  back with `new CompanyGetOptions { IfNoneMatch = etag }`: a 304 answer returns `null`, but it costs
+  1 credit too. Without `IfNoneMatch` the SDK never sends `If-None-Match`.
 - `CompanyList` and `SourceList` are read-only lists with a `Skipped` property; `ArticlePage.Skipped` does
   the same for search pages. Entries that cannot be read land there and are logged as warnings.
 
@@ -294,7 +296,6 @@ using var client = new FinlightClient(new FinlightConfig
 | `BurstWait` | 10 s | burst wait when `Retry-After` is missing |
 | `MaxPages` | 10 | page cap of `SearchAllAsync` |
 | `MaxResponseBytes` | 32 MiB | size limit of a REST answer |
-| `CompanyCacheSize` | 256 | records kept by `Companies.GetAsync`, 0 turns it off |
 | `PingInterval` | 25 s | stream ping |
 | `WatchdogTimeout` | 60 s | reconnect when no pong came for this long |
 | `RotationInterval` | 115 min | fresh connection before the 2 h limit |

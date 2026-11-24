@@ -98,7 +98,8 @@ public sealed class RequestTests
                 var cache = record.GetCacheInfo()!;
                 Assert.Equal(fixture["response"]!["headers"]!["etag"]!.GetValue<string>(), cache.Etag);
                 Assert.Equal(fixture["response"]!["headers"]!["cache-control"]!.GetValue<string>(), cache.CacheControl);
-                Assert.False(cache.NotModified);
+                // No caller ifNoneMatch: no If-None-Match, the SDK keeps no company cache of its own.
+                Assert.False(Assert.Single(rest.Mock.Requests).Headers.ContainsKey("If-None-Match"));
                 Assert.Equal(record.Listings.Count, record.Listings.Select(l => l.Mic).Distinct().Count());
                 Assert.Equal(record.PrimaryListing!.Mic, record.Listings[0].Mic);
                 Assert.True(record.Listings[0].Active);
@@ -132,20 +133,15 @@ public sealed class RequestTests
         Assert.Null(result);
         AssertRequest(fixture["request"]!, Assert.Single(rest.Mock.Requests));
 
-        // The SDK's own cache: the first call stores the record, the second revalidates and gets it back on 304.
+        // The SDK keeps no cache: the same id again without ifNoneMatch is a plain request, never revalidated.
         var full = Kit.Obj("fixtures/requests/companies-get.json");
-        rest.Mock.Enqueue(MockResponse.FromFixture(full["response"]!), MockResponse.FromFixture(fixture["response"]!));
-        var first = await rest.Client.Companies.GetAsync(900001);
-        var second = await rest.Client.Companies.GetAsync(900001);
-        // A copy of the cached record with its own cache info; the earlier record is left unchanged.
-        Assert.NotSame(first, second);
-        Assert.Equal(first!.GetRawJson(), second!.GetRawJson());
-        Assert.Equal(first.CompanyId, second.CompanyId);
-        Assert.True(second.GetCacheInfo()!.NotModified);
-        Assert.False(first.GetCacheInfo()!.NotModified);
+        rest.Mock.Enqueue(MockResponse.FromFixture(full["response"]!), MockResponse.FromFixture(full["response"]!));
+        Assert.NotNull(await rest.Client.Companies.GetAsync(900001));
+        Assert.NotNull(await rest.Client.Companies.GetAsync(900001));
         var requests = rest.Mock.Requests;
+        Assert.Equal(3, requests.Count);
         Assert.False(requests[1].Headers.ContainsKey("If-None-Match"));
-        Assert.Equal(etag, requests[2].Header("If-None-Match"));
+        Assert.False(requests[2].Headers.ContainsKey("If-None-Match"));
     }
 
     private static LookupOptions? Lookup(JsonNode? args)

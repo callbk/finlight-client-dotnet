@@ -230,8 +230,6 @@ public sealed class SearchAllResult : IAsyncEnumerable<Article>
 public sealed class CompaniesService
 {
     private readonly HttpTransport _http;
-    private readonly object _cacheLock = new();
-    private readonly LinkedList<(long Id, string Etag, CompanyRecord Record)> _cache = new();
 
     internal CompaniesService(HttpTransport http) => _http = http;
 
@@ -263,10 +261,11 @@ public sealed class CompaniesService
     }
 
     /// <summary>
-    /// <c>GET /v3/companies/{companyId}</c>. With <see cref="CompanyGetOptions.IfNoneMatch"/> a 304 returns
-    /// null ("not modified"). Without it the SDK revalidates its own cached copy and returns that copy on 304.
-    /// <see cref="CompanyRecord.GetCacheInfo"/> exposes the ETag. A 404 is a <see cref="NotFoundException"/>.
-    /// Every call costs 1 credit, a 304 revalidation included.
+    /// <c>GET /v3/companies/{companyId}</c>. The SDK keeps no cache: it sends <c>If-None-Match</c> only with your
+    /// <see cref="CompanyGetOptions.IfNoneMatch"/>, and a 304 then returns null ("not modified").
+    /// <see cref="CompanyRecord.GetCacheInfo"/> exposes the ETag and Cache-Control, so you can keep the record
+    /// yourself. A 404 is a <see cref="NotFoundException"/>. Every call costs 1 credit, a 304 included: to save
+    /// credits, keep the record and do not call again within its <c>max-age</c>.
     /// </summary>
     /// <param name="companyId">The company id.</param>
     /// <param name="options">Your own ETag.</param>
@@ -275,47 +274,25 @@ public sealed class CompaniesService
     public async Task<CompanyRecord?> GetAsync(long companyId, CompanyGetOptions? options = null, CancellationToken cancellationToken = default)
     {
         var id = Requests.CompanyId(companyId);
-        if (options?.IfNoneMatch is { Length: 0 })
+        var etag = options?.IfNoneMatch;
+        if (etag is { Length: 0 })
         {
             throw new FinlightValidationException("ifNoneMatch must not be empty", "ifNoneMatch");
         }
 
-        var cached = Lookup(id);
-        var etag = options?.IfNoneMatch ?? cached?.Etag;
         var headers = etag is null ? null : new Dictionary<string, string> { ["If-None-Match"] = etag };
         var path = "/v3/companies/" + id.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var result = await _http
             .SendAsync(HttpMethod.Get, path, null, headers, allowNotModified: etag is not null, cancellationToken)
             .ConfigureAwait(false);
-        var cacheControl = RawHeader(result, "Cache-Control");
         if (result.Status == 304)
         {
-            if (options?.IfNoneMatch is not null)
-            {
-                return null;
-            }
-
-            if (cached is { } entry && entry.Etag == etag)
-            {
-                // A copy with its own cache info: records handed out earlier never change.
-                var copy = entry.Record with { };
-                copy.Cache = new CacheInfo(entry.Etag, cacheControl, NotModified: true);
-                Store(id, entry.Etag, copy);
-                return copy;
-            }
-
-            throw new FinlightDecodeException("unexpected 304 Not Modified without a cached record");
+            return null;
         }
 
         using var doc = Decode.Parse(result.Body);
         var record = Decode.CompanyRecord(Decode.Field(doc.RootElement, "company", JsonValueKind.Object), "$.company");
-        var newEtag = RawHeader(result, "ETag");
-        record.Cache = new CacheInfo(newEtag, cacheControl, NotModified: false);
-        if (newEtag is not null)
-        {
-            Store(id, newEtag, record);
-        }
-
+        record.Cache = new CacheInfo(RawHeader(result, "ETag"), RawHeader(result, "Cache-Control"));
         return record;
     }
 
@@ -331,49 +308,6 @@ public sealed class CompaniesService
         var array = Decode.Field(doc.RootElement, "companies", JsonValueKind.Array);
         var (items, skipped) = Decode.Entries(array, "$.companies", Decode.CompanyRecord, _http.Log);
         return new CompanyList(items, skipped);
-    }
-
-    private (string Etag, CompanyRecord Record)? Lookup(long id)
-    {
-        lock (_cacheLock)
-        {
-            for (var node = _cache.First; node is not null; node = node.Next)
-            {
-                if (node.Value.Id == id)
-                {
-                    return (node.Value.Etag, node.Value.Record);
-                }
-            }
-
-            return null;
-        }
-    }
-
-    private void Store(long id, string etag, CompanyRecord record)
-    {
-        var size = _http.Config.CompanyCacheSize;
-        if (size <= 0)
-        {
-            return;
-        }
-
-        lock (_cacheLock)
-        {
-            for (var node = _cache.First; node is not null; node = node.Next)
-            {
-                if (node.Value.Id == id)
-                {
-                    _cache.Remove(node);
-                    break;
-                }
-            }
-
-            _cache.AddFirst((id, etag, record));
-            while (_cache.Count > size)
-            {
-                _cache.RemoveLast();
-            }
-        }
     }
 }
 

@@ -96,8 +96,9 @@ article = await client.Articles.GetByLinkAsync("https://www.reuters.com/...");
 
 var companies = await client.Companies.SearchAsync(new CompanySearchParams { Q = "NVDA", Mic = "XNAS" }); // at most 10, no pages
 companies = await client.Companies.GetManyAsync([4821, 1001]);
-var company = await client.Companies.GetAsync(4821);   // revalidated with its ETag next time
-Console.WriteLine(company?.GetCacheInfo()?.Etag);
+var company = await client.Companies.GetAsync(4821);
+var etag = company?.GetCacheInfo()?.Etag;            // keep the record and its ETag yourself
+var unchanged = await client.Companies.GetAsync(4821, new CompanyGetOptions { IfNoneMatch = etag }); // null on 304
 
 var sources = await client.Sources.ListAsync();
 ```
@@ -107,9 +108,10 @@ var sources = await client.Sources.ListAsync();
 - 企業の参照には `entityAccess` の権限が必要です（ない場合は `ForbiddenException`）。
 - 企業とソースの参照は、記事のリクエストと同じくリクエストごとに 1 クレジットかかります（`GetManyAsync` は ID ごとではなく
   リクエストごとに 1）。304 の再検証とエラーも 1 クレジットかかります。他の呼び出しと同様に 429 になることがあります。
-- `Companies.GetAsync` は直近のレコードを保持し、ETag で再検証します（`CompanyCacheSize`）。独自の
-  `new CompanyGetOptions { IfNoneMatch = etag }` を渡した場合、304 の応答は `null` を返します。`GetCacheInfo()` は
-  `Etag`、`CacheControl`、`NotModified` を返します。
+- SDK は企業レコードをキャッシュしません。`GetCacheInfo()` はレコードの `Etag` と `CacheControl` を返します。
+  クレジットを節約するには、レコードを自分で保持し、`max-age` の間は再度呼び出さないでください。ETag は
+  `new CompanyGetOptions { IfNoneMatch = etag }` で渡せます。304 の応答は `null` を返しますが、これも 1 クレジットかかります。
+  `IfNoneMatch` がなければ SDK は `If-None-Match` を送りません。
 - `CompanyList` と `SourceList` は `Skipped` プロパティを持つ読み取り専用リストです。検索ページの `ArticlePage.Skipped`
   も同様です。読めなかったエントリはそこに入り、警告としてログに出ます。
 
@@ -288,7 +290,6 @@ using var client = new FinlightClient(new FinlightConfig
 | `BurstWait` | 10 秒 | `Retry-After` がないときのバースト待機 |
 | `MaxPages` | 10 | `SearchAllAsync` のページ上限 |
 | `MaxResponseBytes` | 32 MiB | REST 応答のサイズ上限 |
-| `CompanyCacheSize` | 256 | `Companies.GetAsync` が保持するレコード数、0 で無効 |
 | `PingInterval` | 25 秒 | ストリームの ping |
 | `WatchdogTimeout` | 60 秒 | この間 pong がなければ再接続 |
 | `RotationInterval` | 115 分 | 2 時間の上限前に新しい接続 |

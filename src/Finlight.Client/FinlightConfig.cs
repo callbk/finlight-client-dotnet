@@ -54,9 +54,6 @@ public sealed record FinlightConfig
     /// <summary>Largest REST response body. Default 32 MiB.</summary>
     public long MaxResponseBytes { get; init; } = 32L * 1024 * 1024;
 
-    /// <summary>Records kept for ETag revalidation in <c>companies.get</c>. Default 256; 0 turns the cache off.</summary>
-    public int CompanyCacheSize { get; init; } = 256;
-
     /// <summary>Interval of the stream's application ping. Default 25 s.</summary>
     public TimeSpan PingInterval { get; init; } = TimeSpan.FromSeconds(25);
 

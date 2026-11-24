@@ -85,6 +85,6 @@ public sealed class CoverageTests
             Assert.True(rel == "MANIFEST" || listed.Contains(rel), $"{rel} is not in MANIFEST");
         }
 
-        Assert.Equal("3.0.0-rc.5", File.ReadAllText(Path.Combine(Kit.Root, "CONTRACT_VERSION")).Trim());
+        Assert.Equal("3.0.0-rc.6", File.ReadAllText(Path.Combine(Kit.Root, "CONTRACT_VERSION")).Trim());
     }
 }
