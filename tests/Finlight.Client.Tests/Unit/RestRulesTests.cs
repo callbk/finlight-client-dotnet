@@ -24,6 +24,8 @@ public sealed class RestRulesTests
             Sources = ["a"],
             OptInSources = ["b"],
             ExcludeSources = ["c"],
+            SourceTypes = [SourceType.Newswire],
+            ExcludeSourceTypes = [],
             From = "2026-01-01",
             To = DateTimeOffset.UnixEpoch,
             Languages = ["en"],
@@ -65,8 +67,15 @@ public sealed class RestRulesTests
 
         // Every set key is sent, explicit false and 0 included.
         var search = JsonNode.Parse(bodies[0])!.AsObject();
-        Assert.Equal(24, search.Count);
+        Assert.Equal(26, search.Count);
         Assert.False(search["hasContent"]!.GetValue<bool>());
+        Assert.Equal("""["newswire"]""", search["sourceTypes"]!.ToJsonString());
+        Assert.Equal("[]", search["excludeSourceTypes"]!.ToJsonString());
+
+        // Search only: the stream frames have no source-type keys.
+        Assert.All(bodies.Skip(1), b => Assert.DoesNotContain("SourceTypes", b, StringComparison.OrdinalIgnoreCase));
+        Assert.Null(typeof(StreamParams).GetProperty("SourceTypes"));
+        Assert.Null(typeof(RawStreamParams).GetProperty("ExcludeSourceTypes"));
         Assert.Equal(0, search["minRelevance"]!.GetValue<double>());
         Assert.Equal("1970-01-01T00:00:00.000Z", search["to"]!.GetValue<string>());
     }
