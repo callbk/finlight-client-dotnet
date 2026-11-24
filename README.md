@@ -104,6 +104,8 @@ var sources = await client.Sources.ListAsync();
 - A miss throws `NotFoundException`; it is never an empty result.
 - Articles indexed before article ids existed can only be fetched by link.
 - Company lookups need the `entityAccess` entitlement (`ForbiddenException` otherwise).
+- Company and source lookups cost 1 credit per successful request (`GetManyAsync` 1 per request, not per
+  id), like an article request. A 304 revalidation and errors are free. They can get a 429 like any call.
 - `Companies.GetAsync` keeps the last records and revalidates them with their ETag (`CompanyCacheSize`).
   With your own `new CompanyGetOptions { IfNoneMatch = etag }`, a 304 answer returns `null`.
   `GetCacheInfo()` gives `Etag`, `CacheControl` and `NotModified`.

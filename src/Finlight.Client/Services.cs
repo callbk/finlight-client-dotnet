@@ -222,7 +222,11 @@ public sealed class SearchAllResult : IAsyncEnumerable<Article>
     }
 }
 
-/// <summary>Company master data (<c>client.Companies</c>). Needs the <c>entityAccess</c> entitlement (403 otherwise).</summary>
+/// <summary>
+/// Company master data (<c>client.Companies</c>). Needs the <c>entityAccess</c> entitlement (403 otherwise).
+/// Every successful request costs 1 credit (<c>ids=</c> with several companies too); a 304 revalidation and
+/// errors are free.
+/// </summary>
 public sealed class CompaniesService
 {
     private readonly HttpTransport _http;
@@ -231,7 +235,7 @@ public sealed class CompaniesService
 
     internal CompaniesService(HttpTransport http) => _http = http;
 
-    /// <summary><c>GET /v3/companies?q=…</c>: resolves a ticker, name, alias, ISIN or vendor notation. At most 10 results, no pages.</summary>
+    /// <summary><c>GET /v3/companies?q=…</c>: resolves a ticker, name, alias, ISIN or vendor notation. At most 10 results, no pages. Costs 1 credit.</summary>
     /// <param name="parameters"><c>q</c> and optional <c>mic</c>.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The companies.</returns>
@@ -247,7 +251,7 @@ public sealed class CompaniesService
         return await ListAsync(query, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary><c>GET /v3/companies?ids=…</c>: 1 to 10 ids. Unknown ids are left out; the order is not guaranteed.</summary>
+    /// <summary><c>GET /v3/companies?ids=…</c>: 1 to 10 ids. Unknown ids are left out; the order is not guaranteed. Costs 1 credit per request, not per id.</summary>
     /// <param name="ids">The company ids.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The companies.</returns>
@@ -262,6 +266,7 @@ public sealed class CompaniesService
     /// <c>GET /v3/companies/{companyId}</c>. With <see cref="CompanyGetOptions.IfNoneMatch"/> a 304 returns
     /// null ("not modified"). Without it the SDK revalidates its own cached copy and returns that copy on 304.
     /// <see cref="CompanyRecord.GetCacheInfo"/> exposes the ETag. A 404 is a <see cref="NotFoundException"/>.
+    /// A 200 costs 1 credit; a 304 revalidation is free.
     /// </summary>
     /// <param name="companyId">The company id.</param>
     /// <param name="options">Your own ETag.</param>
@@ -379,7 +384,7 @@ public sealed class SourcesService
 
     internal SourcesService(HttpTransport http) => _http = http;
 
-    /// <summary><c>GET /v3/sources</c>: the full catalog, sorted by domain. Not metered.</summary>
+    /// <summary><c>GET /v3/sources</c>: the full catalog, sorted by domain. Costs 1 credit; errors are free.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The sources.</returns>
     public async Task<SourceList> ListAsync(CancellationToken cancellationToken = default)

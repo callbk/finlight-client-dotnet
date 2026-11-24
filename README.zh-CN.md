@@ -104,6 +104,8 @@ var sources = await client.Sources.ListAsync();
 - 未找到时抛出 `NotFoundException`，绝不是空结果。
 - 在文章 ID 出现之前索引的文章只能按链接获取。
 - 公司查询需要 `entityAccess` 权限（否则为 `ForbiddenException`）。
+- 公司和来源查询与文章请求一样，每个成功的请求消耗 1 个额度（`GetManyAsync` 按请求计 1 个，不按 ID 计）。
+  304 重新验证和错误不收费。与其他调用一样，可能收到 429。
 - `Companies.GetAsync` 会保留最近的记录并用 ETag 重新验证（`CompanyCacheSize`）。使用你自己的
   `new CompanyGetOptions { IfNoneMatch = etag }` 时，304 应答返回 `null`。`GetCacheInfo()` 提供 `Etag`、
   `CacheControl` 和 `NotModified`。
