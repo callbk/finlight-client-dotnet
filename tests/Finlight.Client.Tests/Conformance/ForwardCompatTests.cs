@@ -118,6 +118,8 @@ public sealed class ForwardCompatTests
             Assert.Empty(probe.Errors);
             if (wire["event"]!.GetValue<string>() == "article.created")
             {
+                // The frame is counted before the consumer loop has taken the item from the stream.
+                await Wait.ForAsync(() => probe.Items.Count == 1, "the item");
                 var item = Assert.Single(probe.Items);
                 Assert.Equal(StreamEventKind.Created, item.Kind);
                 Assert.NotNull(JsonNode.Parse(item.GetRawJson())!["sequence"]);
