@@ -224,8 +224,8 @@ public sealed class SearchAllResult : IAsyncEnumerable<Article>
 
 /// <summary>
 /// Company master data (<c>client.Companies</c>). Needs the <c>entityAccess</c> entitlement (403 otherwise).
-/// Every successful request costs 1 credit (<c>ids=</c> with several companies too); a 304 revalidation and
-/// errors are free.
+/// Every request costs 1 credit, like an article request (<c>ids=</c> with several companies too); a 304
+/// revalidation and errors cost 1 credit too.
 /// </summary>
 public sealed class CompaniesService
 {
@@ -266,7 +266,7 @@ public sealed class CompaniesService
     /// <c>GET /v3/companies/{companyId}</c>. With <see cref="CompanyGetOptions.IfNoneMatch"/> a 304 returns
     /// null ("not modified"). Without it the SDK revalidates its own cached copy and returns that copy on 304.
     /// <see cref="CompanyRecord.GetCacheInfo"/> exposes the ETag. A 404 is a <see cref="NotFoundException"/>.
-    /// A 200 costs 1 credit; a 304 revalidation is free.
+    /// Every call costs 1 credit, a 304 revalidation included.
     /// </summary>
     /// <param name="companyId">The company id.</param>
     /// <param name="options">Your own ETag.</param>
@@ -384,7 +384,7 @@ public sealed class SourcesService
 
     internal SourcesService(HttpTransport http) => _http = http;
 
-    /// <summary><c>GET /v3/sources</c>: the full catalog, sorted by domain. Costs 1 credit; errors are free.</summary>
+    /// <summary><c>GET /v3/sources</c>: the full catalog, sorted by domain. Costs 1 credit, errors included.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The sources.</returns>
     public async Task<SourceList> ListAsync(CancellationToken cancellationToken = default)

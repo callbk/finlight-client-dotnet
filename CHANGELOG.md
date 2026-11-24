@@ -14,7 +14,7 @@ Added:
 - REST v3: `Articles.SearchAsync`, `Articles.SearchAllAsync` (frozen body, cursor walk, `MaxPages`),
   `Articles.GetAsync`, `Articles.GetByLinkAsync`, `Companies.SearchAsync`, `Companies.GetManyAsync`,
   `Companies.GetAsync` (ETag revalidation, `IfNoneMatch`), `Sources.ListAsync`. The company and source
-  lookups cost 1 credit per successful request; a 304 revalidation and errors are free.
+  lookups cost 1 credit per request, like an article request; a 304 revalidation and errors cost 1 credit too.
 - `SourceTypes` and `ExcludeSourceTypes` on `SearchParams` (search and `SearchAllAsync`), `StreamParams`
   and `RawStreamParams`, with the open vocabulary `SourceType` (`newswire`, `press_release`,
   `financial_media`, `general_media`, `aggregator`, `blog`, `government`). The stream frames carry them

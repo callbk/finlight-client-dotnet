@@ -105,8 +105,8 @@ var sources = await client.Sources.ListAsync();
 - 찾지 못하면 `NotFoundException`을 던집니다. 빈 결과가 아닙니다.
 - 기사 ID 도입 전에 색인된 기사는 링크로만 가져올 수 있습니다.
 - 기업 조회에는 `entityAccess` 권한이 필요합니다(없으면 `ForbiddenException`).
-- 기업과 소스 조회는 기사 요청처럼 성공한 요청마다 1크레딧이 듭니다(`GetManyAsync`는 ID마다가 아니라 요청마다 1).
-  304 재검증과 오류는 무료입니다. 다른 호출처럼 429가 올 수 있습니다.
+- 기업과 소스 조회는 기사 요청처럼 요청마다 1크레딧이 듭니다(`GetManyAsync`는 ID마다가 아니라 요청마다 1).
+  304 재검증과 오류도 1크레딧이 듭니다. 다른 호출처럼 429가 올 수 있습니다.
 - `Companies.GetAsync`는 최근 레코드를 보관하고 ETag로 재검증합니다(`CompanyCacheSize`). 직접
   `new CompanyGetOptions { IfNoneMatch = etag }`를 넘기면 304 응답은 `null`을 반환합니다. `GetCacheInfo()`는
   `Etag`, `CacheControl`, `NotModified`를 제공합니다.

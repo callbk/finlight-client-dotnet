@@ -57,8 +57,8 @@ API のキー 1 つに対応します（`OrderBy` は `orderBy`）。設定し�
 - 見つからない場合は `NotFoundException` になります。空の結果にはなりません。
 - 記事 ID の導入前にインデックスされた記事はリンクでのみ取得できます。
 - 企業の参照には `entityAccess` の権限が必要です（ない場合は `ForbiddenException`）。
-- 企業とソースの参照は、記事のリクエストと同じく成功したリクエストごとに 1 クレジットかかります（`GetManyAsync` は ID ごとではなく
-  リクエストごとに 1）。304 の再検証とエラーは無料です。他の呼び出しと同様に 429 になることがあります。
+- 企業とソースの参照は、記事のリクエストと同じくリクエストごとに 1 クレジットかかります（`GetManyAsync` は ID ごとではなく
+  リクエストごとに 1）。304 の再検証とエラーも 1 クレジットかかります。他の呼び出しと同様に 429 になることがあります。
 - `Companies.GetAsync` は直近のレコードを保持し、ETag で再検証します（`CompanyCacheSize`）。独自の
   `new CompanyGetOptions { IfNoneMatch = etag }` を渡した場合、304 の応答は `null` を返します。`GetCacheInfo()` は
   `Etag`、`CacheControl`、`NotModified` を返します。
