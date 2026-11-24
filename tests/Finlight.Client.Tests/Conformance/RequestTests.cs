@@ -40,7 +40,10 @@ public sealed class RequestTests
             // The parameter type has no such key: a typo does not compile, and mapping the kit's
             // arguments fails before any request (R-REQ-3).
             Assert.Throws<JsonException>(() => Rest.Args<SearchParams>(args));
-            Assert.DoesNotContain(typeof(SearchParams).GetProperties(), p => p.Name == "EventType");
+            // No member of any kind, in any spelling, maps to the kit's misspelled key.
+            Assert.DoesNotContain(
+                typeof(SearchParams).GetMembers(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance),
+                m => string.Equals(m.Name, "EventType", StringComparison.OrdinalIgnoreCase));
             Assert.Empty(rest.Mock.Requests);
             return;
         }
@@ -132,8 +135,12 @@ public sealed class RequestTests
         rest.Mock.Enqueue(MockResponse.FromFixture(full["response"]!), MockResponse.FromFixture(fixture["response"]!));
         var first = await rest.Client.Companies.GetAsync(900001);
         var second = await rest.Client.Companies.GetAsync(900001);
-        Assert.Same(first, second);
-        Assert.True(second!.GetCacheInfo()!.NotModified);
+        // A copy of the cached record with its own cache info; the earlier record is left unchanged.
+        Assert.NotSame(first, second);
+        Assert.Equal(first!.GetRawJson(), second!.GetRawJson());
+        Assert.Equal(first.CompanyId, second.CompanyId);
+        Assert.True(second.GetCacheInfo()!.NotModified);
+        Assert.False(first.GetCacheInfo()!.NotModified);
         var requests = rest.Mock.Requests;
         Assert.False(requests[1].Headers.ContainsKey("If-None-Match"));
         Assert.Equal(etag, requests[2].Header("If-None-Match"));

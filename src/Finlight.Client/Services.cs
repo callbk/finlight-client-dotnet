@@ -169,6 +169,24 @@ public sealed class SearchAllResult : IAsyncEnumerable<Article>
         }
     }
 
+    /// <summary>One page; a cancellation arrives with the caller's token, not the internal linked one (R-RETRY-1).</summary>
+    private async Task<ArticlePage> FetchAsync(JsonObject body, CancellationToken linked, CancellationToken enumeratorToken)
+    {
+        try
+        {
+            return await _articles.SearchBodyAsync(body, linked).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException canceled) when (CallerToken(enumeratorToken) is { } caller)
+        {
+            throw new OperationCanceledException(canceled.Message, canceled, caller);
+        }
+    }
+
+    private CancellationToken? CallerToken(CancellationToken enumeratorToken)
+        => _callToken.IsCancellationRequested ? _callToken
+            : enumeratorToken.IsCancellationRequested ? enumeratorToken
+            : null;
+
     private async IAsyncEnumerable<ArticlePage> PagesCoreAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_callToken, cancellationToken);
@@ -181,7 +199,7 @@ public sealed class SearchAllResult : IAsyncEnumerable<Article>
                 body["cursor"] = cursor;
             }
 
-            var page = await _articles.SearchBodyAsync(body, linked.Token).ConfigureAwait(false);
+            var page = await FetchAsync(body, linked.Token, cancellationToken).ConfigureAwait(false);
             PagesFetched = number;
             var next = page.Pagination.HasMore ? page.Pagination.NextCursor : null;
             NextCursor = next;
@@ -274,9 +292,11 @@ public sealed class CompaniesService
 
             if (cached is { } entry && entry.Etag == etag)
             {
-                entry.Record.Cache = new CacheInfo(entry.Etag, cacheControl, NotModified: true);
-                Store(id, entry.Etag, entry.Record);
-                return entry.Record;
+                // A copy with its own cache info: records handed out earlier never change.
+                var copy = entry.Record with { };
+                copy.Cache = new CacheInfo(entry.Etag, cacheControl, NotModified: true);
+                Store(id, entry.Etag, copy);
+                return copy;
             }
 
             throw new FinlightDecodeException("unexpected 304 Not Modified without a cached record");

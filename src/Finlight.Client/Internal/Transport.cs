@@ -58,7 +58,9 @@ internal sealed class HttpTransport : IDisposable
             {
                 AutomaticDecompression = DecompressionMethods.All,
                 PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-                AllowAutoRedirect = true,
+                // No redirects: SocketsHttpHandler strips only Authorization, so X-API-KEY would go to
+                // whatever host a Location names, and a POST search would turn into a GET.
+                AllowAutoRedirect = false,
             };
             _http = new HttpClient(handler, disposeHandler: true) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
             _ownsHttp = true;
@@ -116,7 +118,8 @@ internal sealed class HttpTransport : IDisposable
 
                 if (status < 400)
                 {
-                    throw new FinlightDecodeException($"{label}: unexpected HTTP {status}");
+                    // Redirects are never followed (the API key must not travel to another host).
+                    throw new FinlightDecodeException($"{label}: unexpected HTTP {status} (redirects are not followed)");
                 }
 
                 var retryAfter = ErrorParser.ParseRetryAfter(
@@ -128,7 +131,8 @@ internal sealed class HttpTransport : IDisposable
                 if (retryClass == RetryClass.Burst && _config.RetryOnBurst == RetryOnBurst.Once && !burstRetried)
                 {
                     burstRetried = true;
-                    var wait = retryAfter ?? _config.BurstWait;
+                    // A missing or implausible Retry-After (over an hour) falls back to BurstWait.
+                    var wait = retryAfter is { } after && after <= Limits.MaxBurstRetryAfter ? after : _config.BurstWait;
                     _log.LogWarning(
                         "{Label}: burst rate limit hit, retrying once in {Wait} ({RequestId})", label, wait, requestId);
                     await WaitAsync(wait, started, apiError, label, cancellationToken).ConfigureAwait(false);

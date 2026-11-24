@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Finlight.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,6 +20,8 @@ public sealed class FinlightClient : IDisposable
     private readonly HttpTransport _http;
     private readonly WsConnector _ws;
     private readonly ILogger _log;
+    private readonly ConcurrentDictionary<StreamCore, byte> _streams = new();
+    private int _disposed;
 
     /// <summary>Creates a client with the default settings.</summary>
     /// <param name="apiKey">The API key (required, not empty).</param>
@@ -45,6 +48,23 @@ public sealed class FinlightClient : IDisposable
         Check(config.MaxResponseBytes > 0, "maxResponseBytes", "positive");
         Check(config.PingInterval > TimeSpan.Zero && config.WatchdogTimeout > TimeSpan.Zero && config.RotationInterval > TimeSpan.Zero, "pingInterval", "positive intervals");
         Check(config.SearchFailedThreshold >= 1, "searchFailedThreshold", "at least 1");
+        CheckWait(config.Timeout, "timeout", positive: true, infiniteAllowed: true);
+        CheckWait(config.ConnectTimeout, "connectTimeout", positive: true, infiniteAllowed: true);
+        if (config.TotalTimeout is { } totalTimeout)
+        {
+            CheckWait(totalTimeout, "totalTimeout", positive: true, infiniteAllowed: false);
+        }
+
+        CheckWait(config.RetryBaseDelay, "retryBaseDelay", positive: false);
+        CheckWait(config.RetryMaxDelay, "retryMaxDelay", positive: false);
+        CheckWait(config.BurstWait, "burstWait", positive: false);
+        CheckWait(config.PingInterval, "pingInterval", positive: true);
+        CheckWait(config.WatchdogTimeout, "watchdogTimeout", positive: true);
+        CheckWait(config.RotationInterval, "rotationInterval", positive: true);
+        CheckWait(config.ReconnectBaseDelay, "reconnectBaseDelay", positive: true);
+        CheckWait(config.ReconnectMaxDelay, "reconnectMaxDelay", positive: true);
+        CheckWait(config.LongBackoff, "longBackoff", positive: true);
+        CheckWait(config.QuotaReconnectInterval, "quotaReconnectInterval", positive: true);
 
         _config = config;
         _log = (config.LoggerFactory ?? NullLoggerFactory.Instance).CreateLogger("Finlight");
@@ -78,7 +98,7 @@ public sealed class FinlightClient : IDisposable
     public FinlightStream StreamAsync(StreamParams parameters, StreamOptions? options = null, CancellationToken cancellationToken = default)
     {
         var subscribe = Requests.StreamSubscribe(parameters);
-        return new FinlightStream(new StreamCore(_config, _log, _ws, raw: false, subscribe, options ?? new StreamOptions()), cancellationToken);
+        return Track(new StreamCore(_config, _log, _ws, raw: false, subscribe, options ?? new StreamOptions(), Untrack), cancellationToken);
     }
 
     /// <summary>
@@ -91,12 +111,26 @@ public sealed class FinlightClient : IDisposable
     public FinlightStream RawStreamAsync(RawStreamParams parameters, StreamOptions? options = null, CancellationToken cancellationToken = default)
     {
         var subscribe = Requests.RawSubscribe(parameters);
-        return new FinlightStream(new StreamCore(_config, _log, _ws, raw: true, subscribe, options ?? new StreamOptions()), cancellationToken);
+        return Track(new StreamCore(_config, _log, _ws, raw: true, subscribe, options ?? new StreamOptions(), Untrack), cancellationToken);
     }
 
-    /// <summary>Releases the HTTP resources the SDK created; an injected <see cref="HttpClient"/> stays open.</summary>
+    /// <summary>
+    /// Closes the client: every running stream of this client is closed (sockets with 1000, timers
+    /// stopped, its iteration ends) and the HTTP resources the SDK created are released. An injected
+    /// <see cref="HttpClient"/> stays open.
+    /// </summary>
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        foreach (var stream in _streams.Keys)
+        {
+            stream.RequestStop();
+        }
+
         _http.Dispose();
         _ws.Dispose();
     }
@@ -104,6 +138,33 @@ public sealed class FinlightClient : IDisposable
     /// <summary>Hides the API key in debug output.</summary>
     /// <returns>A description without secrets.</returns>
     public override string ToString() => $"FinlightClient {{ BaseUrl = {_config.BaseUrl}, Version = {Version} }}";
+
+    private FinlightStream Track(StreamCore core, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        _streams.TryAdd(core, 0);
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            // Dispose ran in between: it may have missed this stream.
+            core.RequestStop();
+        }
+
+        return new FinlightStream(core, cancellationToken);
+    }
+
+    private void Untrack(StreamCore core) => _streams.TryRemove(core, out _);
+
+    /// <summary>Durations must fit the .NET timers (about 24 days), so a bad value fails here, not in a wait.</summary>
+    private static void CheckWait(TimeSpan value, string param, bool positive, bool infiniteAllowed = false)
+    {
+        if (infiniteAllowed && value == System.Threading.Timeout.InfiniteTimeSpan)
+        {
+            return;
+        }
+
+        var ok = (positive ? value > TimeSpan.Zero : value >= TimeSpan.Zero) && value <= Limits.MaxWait;
+        Check(ok, param, (positive ? "positive" : "0 or more") + " and at most " + Limits.MaxWait.TotalDays.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " days");
+    }
 
     private static void Check(bool ok, string param, string what)
     {

@@ -9,7 +9,9 @@ namespace Finlight;
 /// <c>null</c> (entitled and requested, but no value exists), and present with a value.
 /// </summary>
 /// <remarks>
-/// <c>default(Optional&lt;T&gt;)</c> is absent. When a model is written back as JSON with
+/// <c>default(Optional&lt;T&gt;)</c> is absent. For a non-nullable value type such as <c>bool</c> there
+/// is no "present with null" state: a JSON <c>null</c> there fails the entry instead of turning into
+/// <c>false</c>. When a model is written back as JSON with
 /// <see cref="JsonSerializer"/>, absent keys stay absent and <c>null</c> stays <c>null</c>.
 /// The converter is attached to the type, so it works with any <see cref="JsonSerializerOptions"/>.
 /// </remarks>
@@ -33,10 +35,13 @@ public readonly struct Optional<T> : IEquatable<Optional<T>>
     /// <summary>True when the key was in the JSON, also when its value is <c>null</c>.</summary>
     public bool IsPresent { get; }
 
-    /// <summary>True when the key was in the JSON with a non-null value.</summary>
+    /// <summary>True when the key was in the JSON with a non-null value (for a non-nullable value type: when present).</summary>
     public bool HasValue => IsPresent && _value is not null;
 
-    /// <summary>The value; <c>null</c> when absent or when present with <c>null</c>.</summary>
+    /// <summary>
+    /// The value; <c>null</c> when absent or when present with <c>null</c>. For a non-nullable value
+    /// type an absent key reads as <c>default</c>, so check <see cref="IsPresent"/> first.
+    /// </summary>
     public T? Value => _value;
 
     /// <summary>Returns the value, or <paramref name="fallback"/> when absent or <c>null</c>.</summary>
@@ -93,14 +98,28 @@ internal sealed class OptionalConverterFactory : JsonConverterFactory
         // A JSON null must reach Read: it is the "present with null" state.
         public override bool HandleNull => true;
 
+        private static bool NotNullable { get; } = typeof(T).IsValueType && Nullable.GetUnderlyingType(typeof(T)) is null;
+
         public override Optional<T> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         {
             if (reader.TokenType == JsonTokenType.Null)
             {
+                if (NotNullable)
+                {
+                    // bool and other plain value types cannot hold null; null must not collapse to false.
+                    throw new JsonException($"null is not a valid {typeof(T).Name} here");
+                }
+
                 return new Optional<T>(default);
             }
 
-            return new Optional<T>(JsonSerializer.Deserialize<T>(ref reader, options));
+            var value = JsonSerializer.Deserialize<T>(ref reader, options);
+            if (value is System.Collections.IEnumerable list and not string)
+            {
+                Internal.ListElements.RequireNoNull(list);
+            }
+
+            return new Optional<T>(value);
         }
 
         public override void Write(Utf8JsonWriter writer, Optional<T> value, JsonSerializerOptions options)

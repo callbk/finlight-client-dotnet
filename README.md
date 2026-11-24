@@ -155,9 +155,9 @@ await foreach (var item in stream)
   `OnQuotaWait(QuotaWaitInfo)`. Exceptions thrown in a hook are logged and never stop the stream.
 - The stream pings every 25 s, reconnects when no pong came for 60 s, and opens a fresh connection after
   115 minutes. After each reconnect it sends the same subscribe and drops duplicates.
-- It never backfills. `ReconnectInfo.LastSeenAt` is the latest `availableAt` (raw: `firstSeenAt`) you saw.
-  Fill gaps with `SearchAllAsync(new SearchParams { From = info.LastSeenAt, OrderBy = OrderBy.AvailableAt })`
-  (raw: `OrderBy.FirstSeenAt`).
+- It never backfills. `ReconnectInfo.LastSeenAt` is the latest `availableAt` (raw: `firstSeenAt`) you saw,
+  or null when nothing arrived yet. Fill gaps with `if (info.LastSeenAt is { } since)` and
+  `SearchAllAsync(new SearchParams { From = since, OrderBy = OrderBy.AvailableAt })` (raw: `OrderBy.FirstSeenAt`).
 - Terminal problems end the loop with an exception: invalid key (`UnauthorizedException`), no WebSocket
   access (`ForbiddenException`), a rejected subscribe (`ValidationFailedException`), and
   `PreemptedException` when another connection took over. Other problems reconnect and go to `OnError`.
@@ -166,13 +166,17 @@ await foreach (var item in stream)
   wait logs a warning and calls `OnQuotaWait`. Set `QuotaReconnect = false` in `FinlightConfig` to end
   the stream with the error instead; `QuotaReconnectInterval` changes the hour.
 - Leaving the loop, the `CancellationToken` or `DisposeAsync()` closes the socket with 1000 and stops
-  every timer. Cancellation arrives as `OperationCanceledException`. One client can run several streams.
+  every timer. Cancellation arrives as `OperationCanceledException`. One client can run several streams;
+  `client.Dispose()` closes all of them.
 
 Limits to know:
 
 - Your plan's connection limit is shared by enriched, raw and older SDK connections. A new connection
   while the limit is reached is refused; the SDK retries after 60 s. Set `Takeover = true` in
   `StreamOptions` to replace the oldest connection instead.
+- The 115-minute renewal opens the new connection before it closes the old one. When your limit leaves
+  no room for that second connection and `Takeover` is off, the SDK closes the old connection first and
+  then connects (a gap of about a second), for this and every later renewal of that stream.
 - Right after subscribing, the server sends the newest matching article once (also after every
   reconnect). It can be old.
 - Live frames over 32,000 bytes are dropped by the server without notice. This can happen with
@@ -299,8 +303,10 @@ using var client = new FinlightClient(new FinlightConfig
 
 With your own `HttpClient`, its timeouts, proxy and handlers apply (the SDK's `Timeout` does not); do not
 add resilience handlers or Polly retries, and do not set a short `HttpClient.Timeout`: the SDK retries
-itself and every attempt costs quota. The SDK never disposes a client it did not create. If you log HTTP
-traffic with `IHttpClientFactory`, hide the key with `RedactLoggedHeaders(["X-API-KEY"])`.
+itself and every attempt costs quota. Turn off redirects (`AllowAutoRedirect = false` on the handler): the
+SDK's own handlers never follow them, because the API key header would go to the new host. The SDK never
+disposes a client it did not create. If you log HTTP traffic with `IHttpClientFactory`, hide the key with
+`RedactLoggedHeaders(["X-API-KEY"])`.
 
 ## Logging
 

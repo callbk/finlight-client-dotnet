@@ -102,7 +102,9 @@ public sealed record FinlightConfig
 
     /// <summary>
     /// Your own HTTP client for REST and the WebSocket handshake. The SDK never disposes it, and its
-    /// timeouts apply. Do not add resilience handlers (Polly): the SDK already retries.
+    /// timeouts apply. Do not add resilience handlers (Polly): the SDK already retries. Turn off
+    /// redirects on its handler (<c>AllowAutoRedirect = false</c>): a redirect would send the API key
+    /// header to another host.
     /// </summary>
     public HttpClient? HttpClient { get; init; }
 

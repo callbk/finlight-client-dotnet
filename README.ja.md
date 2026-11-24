@@ -154,8 +154,9 @@ await foreach (var item in stream)
   フック内の例外はログに出るだけで、ストリームを止めません。
 - ストリームは 25 秒ごとに ping を送り、60 秒 pong がなければ再接続し、115 分後に新しい接続を開きます。
   再接続のたびに同じ subscribe を送り、重複を捨てます。
-- バックフィルはしません。`ReconnectInfo.LastSeenAt` は最後に見た `availableAt`（raw では `firstSeenAt`）です。
-  `SearchAllAsync(new SearchParams { From = info.LastSeenAt, OrderBy = OrderBy.AvailableAt })`
+- バックフィルはしません。`ReconnectInfo.LastSeenAt` は最後に見た `availableAt`（raw では `firstSeenAt`）で、まだ何も
+  届いていないときは null です。`if (info.LastSeenAt is { } since)` と
+  `SearchAllAsync(new SearchParams { From = since, OrderBy = OrderBy.AvailableAt })`
   （raw では `OrderBy.FirstSeenAt`）で欠けた分を取得してください。
 - 終了となる問題は例外でループを終えます：無効なキー（`UnauthorizedException`）、WebSocket の権限なし（`ForbiddenException`）、
   拒否された subscribe（`ValidationFailedException`）、別の接続に引き継がれたときの `PreemptedException`。
@@ -166,11 +167,14 @@ await foreach (var item in stream)
   1 時間の間隔を変えられます。
 - ループを抜ける、`CancellationToken`、または `DisposeAsync()` でソケットを 1000 で閉じ、すべてのタイマーを止めます。
   キャンセルは `OperationCanceledException` として届きます。1 つのクライアントで複数のストリームを同時に実行できます。
+  `client.Dispose()` はそのすべてを閉じます。
 
 知っておくべき制限：
 
 - プランの接続数上限は enriched、raw、旧 SDK の接続で共有されます。上限に達しているときの新しい接続は拒否され、
   SDK は 60 秒後に再試行します。`StreamOptions` で `Takeover = true` にすると、代わりに最も古い接続を置き換えます。
+- 115 分ごとの接続更新では、古い接続を閉じる前に新しい接続を開きます。上限に 2 本目の余地がなく `Takeover` がオフのとき、
+  SDK は古い接続を先に閉じてから接続します（1 秒ほどの空白）。そのストリームの以後の更新もすべてそうします。
 - subscribe の直後、サーバーは一致する最新の記事を 1 件送ります（再接続のたびにも）。古い記事のこともあります。
 - 32,000 バイトを超えるライブフレームはサーバーが通知なしに破棄します。長い記事で `Include = [IncludeBlock.Content]`
   を使うと起こりえます。`Articles.GetAsync` で取得してください。
@@ -294,7 +298,9 @@ using var client = new FinlightClient(new FinlightConfig
 
 独自の `HttpClient` では、そのタイムアウト、プロキシ、ハンドラーが適用されます（SDK の `Timeout` は適用されません）。
 レジリエンスハンドラーや Polly の再試行を追加せず、短い `HttpClient.Timeout` も設定しないでください。SDK 自身が再試行し、
-試行ごとにクォータを消費します。SDK は自分が作っていないクライアントを破棄しません。`IHttpClientFactory` で HTTP 通信を
+試行ごとにクォータを消費します。リダイレクトはオフにしてください（ハンドラーで `AllowAutoRedirect = false`）。API キーの
+ヘッダーが別のホストに送られるため、SDK 自身のハンドラーはリダイレクトに従いません。SDK は自分が作っていないクライアントを
+破棄しません。`IHttpClientFactory` で HTTP 通信を
 ログに出す場合は、`RedactLoggedHeaders(["X-API-KEY"])` でキーを隠してください。
 
 ## ログ

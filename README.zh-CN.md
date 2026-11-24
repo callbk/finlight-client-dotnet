@@ -152,8 +152,9 @@ await foreach (var item in stream)
   不会结束流的问题的 `OnError(FinlightException)`，以及 `OnQuotaWait(QuotaWaitInfo)`。钩子中抛出的异常会被记录，
   不会停止流。
 - 流每 25 秒发送 ping，60 秒内没有 pong 就重新连接，115 分钟后打开新连接。每次重连后发送相同的订阅并丢弃重复项。
-- 它从不补数据。`ReconnectInfo.LastSeenAt` 是你看到的最新 `availableAt`（raw：`firstSeenAt`）。用
-  `SearchAllAsync(new SearchParams { From = info.LastSeenAt, OrderBy = OrderBy.AvailableAt })` 填补空缺
+- 它从不补数据。`ReconnectInfo.LastSeenAt` 是你看到的最新 `availableAt`（raw：`firstSeenAt`），还没有收到任何内容时为 null。
+  用 `if (info.LastSeenAt is { } since)` 和
+  `SearchAllAsync(new SearchParams { From = since, OrderBy = OrderBy.AvailableAt })` 填补空缺
   （raw：`OrderBy.FirstSeenAt`）。
 - 终止性问题会以异常结束循环：无效密钥（`UnauthorizedException`）、无 WebSocket 权限（`ForbiddenException`）、
   订阅被拒（`ValidationFailedException`），以及另一个连接接管时的 `PreemptedException`。其他问题会重连并交给 `OnError`。
@@ -161,12 +162,14 @@ await foreach (var item in stream)
   每次等待都会记录警告并调用 `OnQuotaWait`。在 `FinlightConfig` 中设置 `QuotaReconnect = false` 则改为以错误结束流；
   `QuotaReconnectInterval` 可改变一小时的间隔。
 - 离开循环、`CancellationToken` 或 `DisposeAsync()` 会以 1000 关闭套接字并停止所有计时器。取消以
-  `OperationCanceledException` 到达。一个客户端可以同时运行多个流。
+  `OperationCanceledException` 到达。一个客户端可以同时运行多个流；`client.Dispose()` 会关闭所有流。
 
 需要了解的限制：
 
 - 套餐的连接上限由 enriched、raw 和旧版 SDK 的连接共享。达到上限时新连接会被拒绝；SDK 在 60 秒后重试。
   在 `StreamOptions` 中设置 `Takeover = true` 可改为替换最旧的连接。
+- 115 分钟的连接更新会先打开新连接，再关闭旧连接。如果连接上限容不下第二个连接且 `Takeover` 关闭，SDK 会先关闭旧连接再连接
+  （约一秒的空档），该流之后的每次更新都这样做。
 - 订阅后服务器会立即发送一次最新的匹配文章（每次重连后也会）。它可能是旧文章。
 - 超过 32,000 字节的实时帧会被服务器静默丢弃。长文章加 `Include = [IncludeBlock.Content]` 时可能发生。
   请用 `Articles.GetAsync` 获取。
@@ -288,7 +291,8 @@ using var client = new FinlightClient(new FinlightConfig
 | `HttpClient` | 无 | 你自己的 `HttpClient`，用于 REST 和 WebSocket 握手 |
 
 使用你自己的 `HttpClient` 时，适用它的超时、代理和处理程序（SDK 的 `Timeout` 不适用）；不要添加弹性处理程序或
-Polly 重试，也不要设置很短的 `HttpClient.Timeout`：SDK 自己会重试，每次尝试都消耗配额。SDK 从不释放不是它创建的客户端。
+Polly 重试，也不要设置很短的 `HttpClient.Timeout`：SDK 自己会重试，每次尝试都消耗配额。请关闭重定向（在 handler 上设置
+`AllowAutoRedirect = false`）：SDK 自己的 handler 从不跟随重定向，因为 API 密钥头会被发到新的主机。SDK 从不释放不是它创建的客户端。
 如果用 `IHttpClientFactory` 记录 HTTP 流量，请用 `RedactLoggedHeaders(["X-API-KEY"])` 隐藏密钥。
 
 ## 日志

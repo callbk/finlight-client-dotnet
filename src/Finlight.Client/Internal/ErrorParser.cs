@@ -133,15 +133,19 @@ internal static class ErrorParser
         }
 
         var trimmed = value.Trim();
-        if (long.TryParse(trimmed, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+        if (trimmed.Length > 0 && trimmed.All(char.IsAsciiDigit))
         {
-            return TimeSpan.FromSeconds(seconds);
+            // Server input: a huge number is cut to the timer limit instead of overflowing.
+            return decimal.TryParse(trimmed, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
+                && seconds < (decimal)Limits.MaxWait.TotalSeconds
+                ? TimeSpan.FromSeconds((double)seconds)
+                : Limits.MaxWait;
         }
 
         if (DateTimeOffset.TryParseExact(trimmed, "r", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var date))
         {
             var wait = date - now;
-            return wait > TimeSpan.Zero ? wait : TimeSpan.Zero;
+            return wait <= TimeSpan.Zero ? TimeSpan.Zero : wait < Limits.MaxWait ? wait : Limits.MaxWait;
         }
 
         return null;

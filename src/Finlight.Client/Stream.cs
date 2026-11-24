@@ -120,7 +120,7 @@ public sealed class FinlightStream : IAsyncEnumerable<StreamEvent>, IAsyncDispos
         try
         {
             var reader = _core.Output;
-            while (await WaitAsync(reader, token).ConfigureAwait(false))
+            while (await WaitAsync(reader, token, cancellationToken).ConfigureAwait(false))
             {
                 while (reader.TryRead(out var item))
                 {
@@ -139,16 +139,19 @@ public sealed class FinlightStream : IAsyncEnumerable<StreamEvent>, IAsyncDispos
         }
     }
 
-    private async Task<bool> WaitAsync(ChannelReader<StreamEvent> reader, CancellationToken token)
+    private async Task<bool> WaitAsync(ChannelReader<StreamEvent> reader, CancellationToken token, CancellationToken enumeratorToken)
     {
         try
         {
             return await reader.WaitToReadAsync(token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        catch (OperationCanceledException canceled) when (token.IsCancellationRequested)
         {
             await _core.StopAsync().ConfigureAwait(false);
-            throw;
+
+            // The caller's token, not the internal linked one (R-RETRY-1).
+            var caller = _callToken.IsCancellationRequested ? _callToken : enumeratorToken;
+            throw new OperationCanceledException(canceled.Message, canceled, caller);
         }
     }
 }

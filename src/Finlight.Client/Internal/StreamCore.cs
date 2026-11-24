@@ -39,6 +39,10 @@ internal sealed class StreamCore
     private static readonly TimeSpan CloseGrace = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(10);
 
+    // Quiet retries of a connect refused for the connection limit right after a rotation closed the old
+    // connection: the server may notice that close a little late.
+    private const int RotationGraceDials = 3;
+
     private readonly FinlightConfig _cfg;
     private readonly ILogger _log;
     private readonly TimeProvider _time;
@@ -54,6 +58,7 @@ internal sealed class StreamCore
     private readonly Queue<string> _dedupeOrder = new();
     private readonly HashSet<string> _dedupe = [];
     private readonly object _startLock = new();
+    private readonly Action<StreamCore>? _onEnded;
 
     private Task? _loop;
     private Conn? _current;
@@ -65,11 +70,14 @@ internal sealed class StreamCore
     private int _quotaWaits;
     private int _searchFailed;
     private int _connections;
+    private int _rotationGrace;
+    private bool _breakBeforeMake;
     private volatile bool _ended;
     private int _pending;
 
-    public StreamCore(FinlightConfig cfg, ILogger log, WsConnector connector, bool raw, JsonObject subscribe, StreamOptions options)
+    public StreamCore(FinlightConfig cfg, ILogger log, WsConnector connector, bool raw, JsonObject subscribe, StreamOptions options, Action<StreamCore>? onEnded = null)
     {
+        _onEnded = onEnded;
         _cfg = cfg;
         _log = log;
         _time = cfg.TimeProvider;
@@ -141,12 +149,30 @@ internal sealed class StreamCore
             {
                 _ended = true;
                 _out.Writer.TryComplete();
+                _onEnded?.Invoke(this);
                 return;
             }
         }
 
         Post(new Stop());
         await loop.ConfigureAwait(false);
+    }
+
+    /// <summary>Asks the stream to stop without waiting for it (used by <c>FinlightClient.Dispose</c>).</summary>
+    public void RequestStop()
+    {
+        lock (_startLock)
+        {
+            if (_loop is null)
+            {
+                _ended = true;
+                _out.Writer.TryComplete();
+                _onEnded?.Invoke(this);
+                return;
+            }
+        }
+
+        Post(new Stop());
     }
 
     private async Task RunAsync()
@@ -197,7 +223,9 @@ internal sealed class StreamCore
                 await OnOpenedAsync(opened).ConfigureAwait(false);
                 break;
             case DialFailed failed:
-                failed.Conn.Refusal = failed.Status is { } status ? new Refusal(status, failed.Body) : null;
+                failed.Conn.Refusal = failed.Status is { } status ? new Refusal(status, failed.Body, failed.Error) : null;
+                failed.Conn.DialError = failed.Error;
+                failed.Conn.DialTimedOut = failed.TimedOut;
                 await OnClosedAsync(failed.Conn, null).ConfigureAwait(false);
                 break;
             case FrameReceived frame:
@@ -221,8 +249,17 @@ internal sealed class StreamCore
                 if (rotation.Conn == _current && rotation.Conn.Planned is null)
                 {
                     _log.LogInformation("stream: rotating the connection before the 2 h gateway limit");
-                    Hooks.OnReconnectScheduled?.Invoke(TimeSpan.Zero, ReconnectReason.Rotation);
-                    StartDial(ReconnectReason.Rotation, first: false);
+                    if (_breakBeforeMake)
+                    {
+                        // The plan has no room for a second connection: close first, then connect.
+                        _rotationGrace = RotationGraceDials;
+                        Drop(rotation.Conn, Planned.Reconnect(ReconnectReason.Rotation, DelayKind.Backoff), graceful: true);
+                    }
+                    else
+                    {
+                        Hooks.OnReconnectScheduled?.Invoke(TimeSpan.Zero, ReconnectReason.Rotation);
+                        StartDial(ReconnectReason.Rotation, first: false);
+                    }
                 }
 
                 break;
@@ -260,7 +297,6 @@ internal sealed class StreamCore
 
     private async Task PumpAsync(Conn conn, ReconnectReason reason, bool first)
     {
-        var (invoker, capture) = _connector.Create();
         var socket = conn.Socket;
         // The server answers application pings only; protocol-level keep-alive stays off.
         socket.Options.KeepAliveInterval = TimeSpan.Zero;
@@ -274,21 +310,25 @@ internal sealed class StreamCore
             socket.Options.SetRequestHeader("x-takeover", "true");
         }
 
+        HttpMessageInvoker? invoker = null;
+        RefusalCapture? capture = null;
+        using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(conn.Cts.Token);
         try
         {
-            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(conn.Cts.Token);
+            (invoker, capture) = _connector.Create();
             connectCts.CancelAfter(_cfg.ConnectTimeout);
             await socket.ConnectAsync(_uri, invoker, connectCts.Token).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            var status = capture.Status ?? (socket.HttpStatusCode != 0 ? (int)socket.HttpStatusCode : (int?)null);
-            Post(new DialFailed(conn, status, capture.Body, exception));
+            var status = capture?.Status ?? (socket.HttpStatusCode != 0 ? (int)socket.HttpStatusCode : (int?)null);
+            var timedOut = connectCts.IsCancellationRequested && !conn.Cts.IsCancellationRequested;
+            Post(new DialFailed(conn, status, capture?.Body, exception, timedOut));
             return;
         }
         finally
         {
-            invoker.Dispose();
+            invoker?.Dispose();
         }
 
         Post(new Opened(conn, reason, first));
@@ -417,6 +457,21 @@ internal sealed class StreamCore
         }
 
         _current = null;
+        if (_rotatingFrom is { } rotatingFrom && conn.Planned is null && IsTooManyRefusal(conn))
+        {
+            // Rotation without takeover on a plan whose connection limit is reached (often a limit of 1):
+            // the new connection was refused because the old one still holds the slot. That is expected,
+            // not an error: close the old connection first, then connect (break-before-make), now and
+            // for every later rotation of this stream.
+            _log.LogInformation("stream: no room for a second connection during rotation; closing the old connection first");
+            _rotatingFrom = null;
+            _breakBeforeMake = true;
+            _rotationGrace = RotationGraceDials;
+            _current = rotatingFrom;
+            Drop(rotatingFrom, Planned.Reconnect(ReconnectReason.Rotation, DelayKind.Backoff), graceful: true);
+            return;
+        }
+
         var planned = conn.Planned ?? Classify(conn, closeStatus);
         if (_rotatingFrom is { } old)
         {
@@ -464,6 +519,15 @@ internal sealed class StreamCore
 
                 if (text.StartsWith(TooManyPrefix, StringComparison.Ordinal))
                 {
+                    if (_rotationGrace > 0)
+                    {
+                        // Right after a rotation closed the old connection the server may not have seen
+                        // that close yet: retry quietly with a short backoff a few times.
+                        _rotationGrace--;
+                        _log.LogDebug("stream: connection limit still reached after closing the old connection; retrying");
+                        return Planned.Reconnect(ReconnectReason.Rotation, DelayKind.Backoff);
+                    }
+
                     Report(DialError(
                         refusal,
                         message,
@@ -507,7 +571,19 @@ internal sealed class StreamCore
 
         if (!conn.Opened)
         {
-            Report(new FinlightNetworkException($"could not connect to the stream endpoint {_uri.Host}"));
+            if (conn.DialError is ObjectDisposedException || _connector.Disposed)
+            {
+                // The FinlightClient was disposed: redialing can never work again.
+                return Planned.Terminal(new FinlightNetworkException(
+                    "the FinlightClient was disposed; the stream ends", conn.DialError));
+            }
+
+            Report(conn.DialTimedOut
+                ? new FinlightTimeoutException(
+                    $"could not connect to the stream endpoint {_uri.Host} within {_cfg.ConnectTimeout}", conn.DialError)
+                : new FinlightNetworkException(
+                    $"could not connect to the stream endpoint {_uri.Host}" + (conn.DialError is { } dialError ? $" ({dialError.Message})" : string.Empty),
+                    conn.DialError));
             return Planned.Reconnect(ReconnectReason.DialFailed, DelayKind.Backoff);
         }
 
@@ -699,6 +775,7 @@ internal sealed class StreamCore
         _dedupe.Clear();
         _dedupeOrder.Clear();
         _out.Writer.TryComplete();
+        _onEnded?.Invoke(this);
     }
 
     // ---- frames ------------------------------------------------------------------------
@@ -742,6 +819,7 @@ internal sealed class StreamCore
             case FrameType.Admitted:
                 _failures = 0;
                 _quotaWaits = 0;
+                _rotationGrace = 0;
                 if (conn == _current && _rotatingFrom is { } old)
                 {
                     _rotatingFrom = null;
@@ -751,6 +829,17 @@ internal sealed class StreamCore
                 CallUser("OnAdmitted", _options.OnAdmitted, new AdmittedInfo(frame.LeaseId, frame.ServerNow, frame.ClientNonce));
                 break;
             case FrameType.Preempted:
+                if (conn != _current)
+                {
+                    // A connection this stream is already retiring, typically the old connection of a
+                    // rotation with takeover at the connection limit: the server preempts it in favour of
+                    // our own new connection. That is the planned end of the old connection, not of the
+                    // stream. Only a preempt of the current connection is terminal (R-WS-2, R-WS-4).
+                    _log.LogDebug("stream: old connection {Id} preempted (reason {Reason}) during rotation", conn.Id, frame.Reason);
+                    Drop(conn, Planned.Reconnect(ReconnectReason.Rotation, DelayKind.Now), graceful: true);
+                    break;
+                }
+
                 var preempted = new PreemptedException(new PreemptReason(frame.Reason!), frame.NewLeaseId, frame.Timestamp);
                 if (frame.Reason == PreemptReasonValues.QuotaExceeded)
                 {
@@ -906,6 +995,7 @@ internal sealed class StreamCore
         => FinlightApiException.Create(
             new ApiErrorData
             {
+                Cause = refusal.Cause,
                 Status = refusal.Status,
                 Title = "WebSocket connection refused",
                 Detail = detail ?? message,
@@ -914,6 +1004,10 @@ internal sealed class StreamCore
                 Message = $"WebSocket connection refused with HTTP {refusal.Status}" + (message is null ? string.Empty : $": {message}"),
             },
             kindFromStatus: true);
+
+    private static bool IsTooManyRefusal(Conn conn)
+        => conn.Refusal is { Status: 403 } refusal
+            && (RefusalMessage(refusal.Body) ?? string.Empty).StartsWith(TooManyPrefix, StringComparison.Ordinal);
 
     private static string? RefusalMessage(string? body)
     {
@@ -1015,7 +1109,7 @@ internal sealed class StreamCore
         public static Planned Terminal(Exception error) => new(ReconnectReason.Closed, DelayKind.Now, error);
     }
 
-    private sealed record Refusal(int Status, string? Body);
+    private sealed record Refusal(int Status, string? Body, Exception? Cause = null);
 
     private sealed class Conn(int id)
     {
@@ -1040,6 +1134,10 @@ internal sealed class StreamCore
         public Planned? Planned { get; set; }
 
         public Refusal? Refusal { get; set; }
+
+        public Exception? DialError { get; set; }
+
+        public bool DialTimedOut { get; set; }
     }
 
     private abstract record Signal;
@@ -1048,7 +1146,7 @@ internal sealed class StreamCore
 
     private sealed record Opened(Conn Conn, ReconnectReason Reason, bool First) : Signal;
 
-    private sealed record DialFailed(Conn Conn, int? Status, string? Body, Exception Error) : Signal;
+    private sealed record DialFailed(Conn Conn, int? Status, string? Body, Exception Error, bool TimedOut) : Signal;
 
     private sealed record FrameReceived(Conn Conn, string Text) : Signal;
 
@@ -1068,6 +1166,7 @@ internal sealed class WsConnector : IDisposable
 {
     private readonly HttpClient? _userClient;
     private readonly HttpMessageInvoker? _shared;
+    private int _disposed;
 
     public WsConnector(HttpClient? userClient)
     {
@@ -1075,18 +1174,28 @@ internal sealed class WsConnector : IDisposable
         if (userClient is null)
         {
             _shared = new HttpMessageInvoker(
-                new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), UseCookies = false },
+                // No redirects: SocketsHttpHandler would send the x-api-key header to the new host.
+                new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), UseCookies = false, AllowAutoRedirect = false },
                 disposeHandler: true);
         }
     }
 
+    public bool Disposed => Volatile.Read(ref _disposed) != 0;
+
     public (HttpMessageInvoker Invoker, RefusalCapture Capture) Create()
     {
+        ObjectDisposedException.ThrowIf(Disposed, this);
         var capture = new RefusalCapture(_userClient, _shared);
         return (new HttpMessageInvoker(capture, disposeHandler: false), capture);
     }
 
-    public void Dispose() => _shared?.Dispose();
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _shared?.Dispose();
+        }
+    }
 }
 
 /// <summary>Forwards the handshake and reads the body of a non-101 answer.</summary>

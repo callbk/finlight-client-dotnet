@@ -97,8 +97,9 @@ API의 키 하나에 대응합니다(`OrderBy`는 `orderBy`). 설정한 속성�
   로그에 남을 뿐 스트림을 멈추지 않습니다.
 - 스트림은 25초마다 ping을 보내고, 60초 동안 pong이 없으면 다시 연결하며, 115분 후 새 연결을 엽니다. 재연결할 때마다
   같은 subscribe를 보내고 중복을 버립니다.
-- 백필은 하지 않습니다. `ReconnectInfo.LastSeenAt`은 마지막으로 본 `availableAt`(raw: `firstSeenAt`)입니다.
-  `SearchAllAsync(new SearchParams { From = info.LastSeenAt, OrderBy = OrderBy.AvailableAt })`
+- 백필은 하지 않습니다. `ReconnectInfo.LastSeenAt`은 마지막으로 본 `availableAt`(raw: `firstSeenAt`)이며, 아직 받은
+  것이 없으면 null입니다. `if (info.LastSeenAt is { } since)`와
+  `SearchAllAsync(new SearchParams { From = since, OrderBy = OrderBy.AvailableAt })`
   (raw: `OrderBy.FirstSeenAt`)로 빈 구간을 채우세요.
 - 종료성 문제는 예외로 루프를 끝냅니다: 잘못된 키(`UnauthorizedException`), WebSocket 권한 없음(`ForbiddenException`),
   거부된 subscribe(`ValidationFailedException`), 다른 연결이 넘겨받았을 때의 `PreemptedException`. 그 밖의 문제는
@@ -109,11 +110,14 @@ API의 키 하나에 대응합니다(`OrderBy`는 `orderBy`). 설정한 속성�
   한 시간 간격을 바꿀 수 있습니다.
 - 루프를 벗어나거나, `CancellationToken`, 또는 `DisposeAsync()`로 소켓을 1000으로 닫고 모든 타이머를 멈춥니다.
   취소는 `OperationCanceledException`으로 전달됩니다. 클라이언트 하나로 여러 스트림을 동시에 실행할 수 있습니다.
+  `client.Dispose()`는 그 모두를 닫습니다.
 
 알아야 할 제한:
 
 - 요금제의 연결 수 제한은 enriched, raw, 이전 SDK 연결이 함께 씁니다. 제한에 도달한 상태의 새 연결은 거부되며 SDK는
   60초 후 다시 시도합니다. `StreamOptions`에서 `Takeover = true`로 하면 대신 가장 오래된 연결을 교체합니다.
+- 115분마다 하는 연결 갱신은 이전 연결을 닫기 전에 새 연결을 엽니다. 한도에 두 번째 연결을 위한 자리가 없고 `Takeover`가
+  꺼져 있으면, SDK는 이전 연결을 먼저 닫고 연결합니다(1초 정도의 공백). 그 스트림의 이후 갱신도 모두 그렇게 합니다.
 - subscribe 직후 서버는 일치하는 최신 기사 하나를 보냅니다(재연결할 때마다도). 오래된 기사일 수 있습니다.
 - 32,000바이트를 넘는 라이브 프레임은 서버가 알림 없이 버립니다. 긴 기사에 `Include = [IncludeBlock.Content]`를
   쓰면 생길 수 있습니다. `Articles.GetAsync`로 가져오세요.
@@ -200,7 +204,8 @@ finlight는 모든 웹훅에 서명합니다. 무엇이든 파싱하기 전에 *
 
 직접 만든 `HttpClient`를 쓰면 그 시간 제한, 프록시, 핸들러가 적용됩니다(SDK의 `Timeout`은 적용되지 않음). 복원력
 핸들러나 Polly 재시도를 추가하지 말고 짧은 `HttpClient.Timeout`도 설정하지 마세요. SDK가 직접 재시도하며 시도마다
-쿼터를 씁니다. SDK는 자신이 만들지 않은 클라이언트를 해제하지 않습니다. `IHttpClientFactory`로 HTTP 트래픽을 로그에
+쿼터를 씁니다. 리디렉션은 끄세요(핸들러에서 `AllowAutoRedirect = false`). API 키 헤더가 다른 호스트로 가기 때문에 SDK 자체
+핸들러는 리디렉션을 따르지 않습니다. SDK는 자신이 만들지 않은 클라이언트를 해제하지 않습니다. `IHttpClientFactory`로 HTTP 트래픽을 로그에
 남긴다면 `RedactLoggedHeaders(["X-API-KEY"])`로 키를 숨기세요.
 
 ## 로깅

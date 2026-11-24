@@ -17,6 +17,34 @@ internal static class FinlightJson
     };
 }
 
+/// <summary>Bounds of the SDK's waits and timers.</summary>
+internal static class Limits
+{
+    /// <summary>The longest wait the SDK schedules: .NET timers take at most about 24.8 days.</summary>
+    public static readonly TimeSpan MaxWait = TimeSpan.FromMilliseconds(int.MaxValue);
+
+    /// <summary>A burst <c>Retry-After</c> above this is not believed; <see cref="FinlightConfig.BurstWait"/> applies instead.</summary>
+    public static readonly TimeSpan MaxBurstRetryAfter = TimeSpan.FromHours(1);
+}
+
+/// <summary>Rejects <c>null</c> inside a list: a present value of the wrong type fails the entry (R-MODELS-1).</summary>
+internal static class ListElements
+{
+    public static void RequireNoNull(System.Collections.IEnumerable list)
+    {
+        var index = 0;
+        foreach (var item in list)
+        {
+            if (item is null)
+            {
+                throw new JsonException($"element {index} of a list is null");
+            }
+
+            index++;
+        }
+    }
+}
+
 /// <summary>Reads a list that may be absent or null as <c>[]</c> (R-MODELS-1).</summary>
 /// <typeparam name="T">The element type.</typeparam>
 internal sealed class NullAsEmptyListConverter<T> : JsonConverter<IReadOnlyList<T>>
@@ -30,7 +58,9 @@ internal sealed class NullAsEmptyListConverter<T> : JsonConverter<IReadOnlyList<
             return [];
         }
 
-        return JsonSerializer.Deserialize<List<T>>(ref reader, options) ?? [];
+        var list = JsonSerializer.Deserialize<List<T>>(ref reader, options) ?? [];
+        ListElements.RequireNoNull(list);
+        return list;
     }
 
     public override void Write(Utf8JsonWriter writer, IReadOnlyList<T> value, JsonSerializerOptions options)
