@@ -172,6 +172,12 @@ internal static class ErrorParser
             ? value.GetString()
             : null;
 
+    /// <summary>The string entries of <c>allowedValues</c> of a REST error entry or a stream error detail; null without one.</summary>
+    public static List<string>? AllowedValues(JsonElement entry)
+        => entry.TryGetProperty("allowedValues", out var values) && values.ValueKind == JsonValueKind.Array
+            ? values.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String).Select(v => v.GetString()!).ToList()
+            : null;
+
     private static List<FieldIssue> Issues(JsonElement obj)
     {
         var list = new List<FieldIssue>();
@@ -187,20 +193,11 @@ internal static class ErrorParser
                 continue;
             }
 
-            List<string>? allowed = null;
-            if (entry.TryGetProperty("allowedValues", out var values) && values.ValueKind == JsonValueKind.Array)
-            {
-                allowed = values.EnumerateArray()
-                    .Where(v => v.ValueKind == JsonValueKind.String)
-                    .Select(v => v.GetString()!)
-                    .ToList();
-            }
-
             list.Add(new FieldIssue
             {
                 Field = Str(entry, "field"),
                 Issue = Str(entry, "issue"),
-                AllowedValues = allowed,
+                AllowedValues = AllowedValues(entry),
             });
         }
 

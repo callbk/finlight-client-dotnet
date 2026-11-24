@@ -950,6 +950,7 @@ internal sealed class StreamCore
                 {
                     Field = ErrorParser.Str(detail, "field"),
                     Issue = constraints.Count > 0 ? string.Join("; ", constraints.Values) : null,
+                    AllowedValues = ErrorParser.AllowedValues(detail),
                     Constraints = constraints,
                 });
             }

@@ -93,6 +93,9 @@ API의 키 하나에 대응합니다(`OrderBy`는 `orderBy`). 설정한 속성�
 - `item.Kind`는 `created`, `updated`, 또는 `other`(이 SDK가 아직 모르는 이벤트)입니다.
 - `client.RawStreamAsync(new RawStreamParams { ... })`는 보강 전의 기사를 전달합니다. `include`가 없고 콘텐츠,
   감성, 기업, 이벤트도 없습니다.
+- `StreamParams`와 `RawStreamParams`는 검색과 같이 `SourceTypes`와 `ExcludeSourceTypes`를 받습니다
+  (`ExcludeSourceTypes = [SourceType.Blog]`). 설정했을 때만 전송됩니다. 알 수 없는 값은 스트림을
+  `ValidationFailedException`으로 끝냅니다.
 - `StreamOptions`의 훅: `OnAdmitted(AdmittedInfo)`, 첫 연결을 제외한 새 연결마다의 `OnReconnect(ReconnectInfo)`,
   스트림을 끝내지 않는 문제의 `OnError(FinlightException)`, 그리고 `OnQuotaWait(QuotaWaitInfo)`. 훅에서 던진 예외는
   로그에 남을 뿐 스트림을 멈추지 않습니다.

@@ -228,6 +228,19 @@ public sealed record StreamParams
     [JsonPropertyName("optInSources")]
     public IReadOnlyList<string>? OptInSources { get; init; }
 
+    /// <summary>
+    /// <c>sourceTypes</c>: only articles from sources of these types; unclassified sources never match.
+    /// Same vocabulary and meaning as <see cref="SearchParams.SourceTypes"/>.
+    /// </summary>
+    [JsonPropertyName("sourceTypes")]
+    public IReadOnlyList<SourceType>? SourceTypes { get; init; }
+
+    /// <summary>
+    /// <c>excludeSourceTypes</c>: drop articles from sources of these types; unclassified sources are kept.
+    /// </summary>
+    [JsonPropertyName("excludeSourceTypes")]
+    public IReadOnlyList<SourceType>? ExcludeSourceTypes { get; init; }
+
     /// <summary><c>language</c>: one language; the server default is <c>en</c>.</summary>
     [JsonPropertyName("language")]
     public string? Language { get; init; }
@@ -271,6 +284,19 @@ public sealed record RawStreamParams
     /// <summary><c>excludeSources</c>.</summary>
     [JsonPropertyName("excludeSources")]
     public IReadOnlyList<string>? ExcludeSources { get; init; }
+
+    /// <summary>
+    /// <c>sourceTypes</c>: only articles from sources of these types; unclassified sources never match.
+    /// Same vocabulary and meaning as <see cref="SearchParams.SourceTypes"/>.
+    /// </summary>
+    [JsonPropertyName("sourceTypes")]
+    public IReadOnlyList<SourceType>? SourceTypes { get; init; }
+
+    /// <summary>
+    /// <c>excludeSourceTypes</c>: drop articles from sources of these types; unclassified sources are kept.
+    /// </summary>
+    [JsonPropertyName("excludeSourceTypes")]
+    public IReadOnlyList<SourceType>? ExcludeSourceTypes { get; init; }
 
     /// <summary><c>language</c>.</summary>
     [JsonPropertyName("language")]

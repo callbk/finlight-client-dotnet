@@ -90,6 +90,8 @@ internal static class Requests
         AddList(frame, "sources", p.Sources);
         AddList(frame, "excludeSources", p.ExcludeSources);
         AddList(frame, "optInSources", p.OptInSources);
+        AddList(frame, "sourceTypes", p.SourceTypes?.Select(r => r.Value).ToList());
+        AddList(frame, "excludeSourceTypes", p.ExcludeSourceTypes?.Select(r => r.Value).ToList());
         AddString(frame, "language", p.Language);
         AddList(frame, "tickers", p.Tickers);
         AddList(frame, "countries", p.Countries);
@@ -106,6 +108,8 @@ internal static class Requests
         AddString(frame, "query", p.Query);
         AddList(frame, "sources", p.Sources);
         AddList(frame, "excludeSources", p.ExcludeSources);
+        AddList(frame, "sourceTypes", p.SourceTypes?.Select(r => r.Value).ToList());
+        AddList(frame, "excludeSourceTypes", p.ExcludeSourceTypes?.Select(r => r.Value).ToList());
         AddString(frame, "language", p.Language);
         AddBool(frame, "includeUpdates", p.IncludeUpdates);
         return frame;

@@ -93,6 +93,9 @@ API のキー 1 つに対応します（`OrderBy` は `orderBy`）。設定し�
 - `item.Kind` は `created`、`updated`、または `other`（この SDK がまだ知らないイベント）です。
 - `client.RawStreamAsync(new RawStreamParams { ... })` はエンリッチ前の記事を届けます。`include` はなく、
   コンテンツ、センチメント、企業、イベントもありません。
+- `StreamParams` と `RawStreamParams` は検索と同じく `SourceTypes` と `ExcludeSourceTypes` を受け付けます
+  （`ExcludeSourceTypes = [SourceType.Blog]`）。設定したときだけ送信されます。未知の値はストリームを
+  `ValidationFailedException` で終わらせます。
 - `StreamOptions` のフック：`OnAdmitted(AdmittedInfo)`、最初以外の新しい接続ごとの `OnReconnect(ReconnectInfo)`、
   ストリームを終わらせない問題の `OnError(FinlightException)`、そして `OnQuotaWait(QuotaWaitInfo)`。
   フック内の例外はログに出るだけで、ストリームを止めません。

@@ -150,6 +150,8 @@ await foreach (var item in stream)
 - `item.Kind` 为 `created`、`updated` 或 `other`（本 SDK 尚不认识的事件）。
 - `client.RawStreamAsync(new RawStreamParams { ... })` 提供富化之前的文章：没有 `include`，没有内容、情感、
   公司或事件。
+- `StreamParams` 和 `RawStreamParams` 与搜索一样接受 `SourceTypes` 和 `ExcludeSourceTypes`
+  （`ExcludeSourceTypes = [SourceType.Blog]`）。只有设置时才会发送。未知的值会以 `ValidationFailedException` 结束流。
 - `StreamOptions` 中的钩子：`OnAdmitted(AdmittedInfo)`、除第一次外每次新连接后的 `OnReconnect(ReconnectInfo)`、
   不会结束流的问题的 `OnError(FinlightException)`，以及 `OnQuotaWait(QuotaWaitInfo)`。钩子中抛出的异常会被记录，
   不会停止流。

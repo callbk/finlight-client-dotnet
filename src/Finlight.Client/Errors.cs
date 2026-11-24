@@ -31,7 +31,7 @@ public sealed record FieldIssue
     /// <summary>What is wrong with it.</summary>
     public string? Issue { get; init; }
 
-    /// <summary>The accepted values, for closed request vocabularies.</summary>
+    /// <summary>The accepted values, for closed request vocabularies (REST errors and stream <c>connection.error</c> details).</summary>
     public IReadOnlyList<string>? AllowedValues { get; init; }
 
     /// <summary>Rule name to text; only on stream validation errors (<c>connection.error</c> details).</summary>

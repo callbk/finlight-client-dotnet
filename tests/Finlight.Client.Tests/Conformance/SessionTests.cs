@@ -6,7 +6,7 @@ using Finlight.Tests.Support;
 
 namespace Finlight.Tests.Conformance;
 
-/// <summary>S-01 to S-28 (WebSocket sessions) and R-13, R-14 (subscribe frames) against an in-process server.</summary>
+/// <summary>S-01 to S-29 (WebSocket sessions) and R-13, R-14 (subscribe frames) against an in-process server.</summary>
 public sealed class SessionTests
 {
     private static readonly Dictionary<string, string> Files = new()
@@ -38,6 +38,7 @@ public sealed class SessionTests
         ["S-26"] = "dial-server-error.json",
         ["S-27"] = "preempted-quota-exceeded-no-reconnect.json",
         ["S-28"] = "dial-quota-exceeded-no-reconnect.json",
+        ["S-29"] = "validation-failed-source-type.json",
     };
 
     public static TheoryData<string> Cases => [.. Files.Keys.Append("S-02").Append("R-13").Append("R-14").Order()];
@@ -104,6 +105,17 @@ public sealed class SessionTests
         }
         ,
         "S-18" => RotationAfterAsync,
+        "S-29" => r =>
+        {
+            // SourceType is an open vocabulary: the SDK sends an unknown value and the server rejects it.
+            var error = Assert.IsType<ValidationFailedException>(r.Probe.Terminal);
+            Assert.Empty(r.Probe.Reconnects);
+            var detail = Assert.Single(error.Errors);
+            Assert.Equal("sourceTypes", detail.Field);
+            Assert.Equal(SourceTypeValues.All.Order(), detail.AllowedValues!.Order());
+            return Task.CompletedTask;
+        }
+        ,
         _ => null,
     };
 

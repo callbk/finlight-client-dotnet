@@ -153,6 +153,9 @@ await foreach (var item in stream)
 - `item.Kind` is `created`, `updated` or `other` (an event this SDK does not know yet).
 - `client.RawStreamAsync(new RawStreamParams { ... })` delivers articles before enrichment: no `include`,
   no content, sentiment, companies or events.
+- `StreamParams` and `RawStreamParams` take `SourceTypes` and `ExcludeSourceTypes` like search
+  (`ExcludeSourceTypes = [SourceType.Blog]`). They are sent only when set. An unknown value ends the stream
+  with `ValidationFailedException`.
 - Hooks in `StreamOptions`: `OnAdmitted(AdmittedInfo)`, `OnReconnect(ReconnectInfo)` after every new
   connection but the first, `OnError(FinlightException)` for problems that do not end the stream, and
   `OnQuotaWait(QuotaWaitInfo)`. Exceptions thrown in a hook are logged and never stop the stream.

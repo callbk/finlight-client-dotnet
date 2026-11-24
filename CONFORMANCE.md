@@ -93,6 +93,7 @@ Contract kit 3.0.0-rc.4. Every case of `conformance/conformance.md` runs as its 
 | S-26 | `SessionTests.Case("S-26")` |
 | S-27 | `SessionTests.Case("S-27")` |
 | S-28 | `SessionTests.Case("S-28")` |
+| S-29 | `SessionTests.Case("S-29")` |
 | V-01 | `VocabularyTests.Case("V-01")` |
 | W-01 | `WebhookTests.Case("W-01")` |
 | W-02 | `WebhookTests.Case("W-02")` |

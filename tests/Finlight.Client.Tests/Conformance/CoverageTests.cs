@@ -33,7 +33,7 @@ public sealed class CoverageTests
     {
         var ids = Kit.CaseIds();
         Assert.Equal(Kit.DeclaredTotal(), ids.Count);
-        Assert.Equal(105, ids.Count);
+        Assert.Equal(106, ids.Count);
         var table = CaseTable();
         Assert.Equal(ids.Order(), table.Keys.Order());
     }

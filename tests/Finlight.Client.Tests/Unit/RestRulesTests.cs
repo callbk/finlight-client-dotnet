@@ -54,8 +54,15 @@ public sealed class RestRulesTests
             {
                 Query = "q", Sources = ["a"], ExcludeSources = ["b"], OptInSources = ["c"], Language = "en", Tickers = ["X"], Countries = ["US"],
                 Categories = ["m"], ExcludeEmptyContent = false, IncludeUpdates = false, Include = [IncludeBlock.Content],
+                SourceTypes = [SourceType.Newswire], ExcludeSourceTypes = [],
             }).ToJsonString(),
-            Requests.RawSubscribe(new RawStreamParams { Query = "q", Sources = ["a"], ExcludeSources = ["b"], Language = "en", IncludeUpdates = true }).ToJsonString(),
+            Requests.RawSubscribe(new RawStreamParams
+            {
+                Query = "q", Sources = ["a"], ExcludeSources = ["b"], Language = "en", IncludeUpdates = true,
+                SourceTypes = [SourceType.Blog], ExcludeSourceTypes = [SourceType.Aggregator, "wire"],
+            }).ToJsonString(),
+            Requests.StreamSubscribe(new StreamParams { Query = "q" }).ToJsonString(),
+            Requests.RawSubscribe(new RawStreamParams { Query = "q" }).ToJsonString(),
         };
         foreach (var body in bodies)
         {
@@ -72,10 +79,17 @@ public sealed class RestRulesTests
         Assert.Equal("""["newswire"]""", search["sourceTypes"]!.ToJsonString());
         Assert.Equal("[]", search["excludeSourceTypes"]!.ToJsonString());
 
-        // Search only: the stream frames have no source-type keys.
-        Assert.All(bodies.Skip(1), b => Assert.DoesNotContain("SourceTypes", b, StringComparison.OrdinalIgnoreCase));
-        Assert.Null(typeof(StreamParams).GetProperty("SourceTypes"));
-        Assert.Null(typeof(RawStreamParams).GetProperty("ExcludeSourceTypes"));
+        // Both stream frames carry the source-type keys as JSON arrays, unknown values as sent.
+        var stream = JsonNode.Parse(bodies[1])!.AsObject();
+        Assert.Equal("""["newswire"]""", stream["sourceTypes"]!.ToJsonString());
+        Assert.Equal("[]", stream["excludeSourceTypes"]!.ToJsonString());
+        var raw = JsonNode.Parse(bodies[2])!.AsObject();
+        Assert.Equal("""["blog"]""", raw["sourceTypes"]!.ToJsonString());
+        Assert.Equal("""["aggregator","wire"]""", raw["excludeSourceTypes"]!.ToJsonString());
+        Assert.False(raw.ContainsKey("include"));
+
+        // Unset, they are not sent at all.
+        Assert.All(bodies.Skip(3), b => Assert.DoesNotContain("SourceTypes", b, StringComparison.OrdinalIgnoreCase));
         Assert.Equal(0, search["minRelevance"]!.GetValue<double>());
         Assert.Equal("1970-01-01T00:00:00.000Z", search["to"]!.GetValue<string>());
     }
