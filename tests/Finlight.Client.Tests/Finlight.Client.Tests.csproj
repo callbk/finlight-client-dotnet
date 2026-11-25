@@ -1,9 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- Oldest supported runtime and the current one. -->
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <RootNamespace>Finlight.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CA1707;CA1861;CA2007;xUnit1030</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Kestrel for the in-process HTTP and WebSocket test servers (tests only, never the package). -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
@@ -23,6 +26,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Finlight.Client\Finlight.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The 5 standard examples are built first and run by ExampleTests against the local mocks. -->
+    <ProjectReference Include="..\..\examples\search\search.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\examples\search-all\search-all.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\examples\lookup\lookup.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\examples\stream\stream.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\examples\webhook-endpoint\webhook-endpoint.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

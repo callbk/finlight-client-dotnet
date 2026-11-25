@@ -2,11 +2,63 @@ name: test
 
 on:
   push:
-    branches: [main]
+    branches: [main, v3]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   test:
+    name: test (${{ matrix.tfm }}, ${{ matrix.culture }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tfm: net8.0       # oldest supported runtime
+            culture: en_US.UTF-8
+          - tfm: net10.0
+            culture: tr_TR.UTF-8 # a culture that breaks naive formatting
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Contract kit matches its MANIFEST
+        run: scripts/sync-conformance.sh --check
+
+      - name: Vocabulary is generated from the kit
+        run: |
+          python3 scripts/generate-vocabulary.py conformance/vocab.json "$RUNNER_TEMP/Vocabulary.g.cs"
+          diff -u src/Finlight.Client/Vocabulary.g.cs "$RUNNER_TEMP/Vocabulary.g.cs"
+
+      - name: README skeleton and translations
+        run: |
+          python3 scripts/check-readme.py
+          python3 scripts/build-readmes.py
+          git diff --exit-code -- README.zh-CN.md README.ja.md README.ko.md
+
+      - name: Restore
+        run: dotnet restore Finlight.Client.slnx
+
+      - name: Lint
+        run: dotnet format Finlight.Client.slnx --verify-no-changes --no-restore
+
+      - name: Build (library, tests, examples)
+        run: dotnet build Finlight.Client.slnx --no-restore -c Release
+
+      - name: Test (unit, every conformance case, the 5 examples)
+        env:
+          LANG: ${{ matrix.culture }}
+          LC_ALL: ${{ matrix.culture }}
+        run: dotnet test tests/Finlight.Client.Tests --no-build -c Release -f ${{ matrix.tfm }} --logger trx
+
+  package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,14 +67,45 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Restore
-        run: dotnet restore
+      - name: Pack into an empty folder
+        run: |
+          rm -rf out
+          dotnet pack src/Finlight.Client -c Release -o out -p:ContinuousIntegrationBuild=true
 
-      - name: Lint
-        run: dotnet format --verify-no-changes --no-restore
+      - name: Package holds no kit, tests or local files
+        run: |
+          for pkg in out/*.nupkg out/*.snupkg; do
+            echo "== $pkg"; unzip -l "$pkg"
+            if unzip -l "$pkg" | grep -Eiq 'conformance/|local/|tests?/|fixtures/|\.env'; then
+              echo "::error::$pkg contains files that must not ship"; exit 1
+            fi
+          done
 
-      - name: Build
-        run: dotnet build --no-restore -c Release
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Test
-        run: dotnet test --no-build -c Release --logger trx
+      # The gitleaks GitHub Action needs a paid license for organization
+      # repositories; the CLI does not. The release archive is pinned by its
+      # SHA-256. .gitleaks.toml allowlists the synthetic keys of the contract
+      # kit and the tests.
+      - name: Secret scan
+        env:
+          GITLEAKS_VERSION: 8.21.2
+          GITLEAKS_SHA256: 5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba
+        run: |
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl -sSfL -o "$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose .
+
+      - name: No AI attribution in commits
+        run: |
+          if git log --format=%B | grep -Eiq 'co-authored-by|generated (by|with)|claude|anthropic|chatgpt|copilot'; then
+            echo "::error::a commit message carries AI attribution"; exit 1
+          fi

@@ -1,86 +1,176 @@
-using Finlight.Http;
-using Finlight.WebSockets;
+using System.Collections.Concurrent;
+using Finlight.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Finlight;
 
 /// <summary>
-/// Entry point to the finlight API: REST search via <see cref="Articles"/> and
-/// <see cref="Sources"/>, real-time streaming via <see cref="WebSocket"/> and
-/// <see cref="RawWebSocket"/>. For streaming with custom options construct
-/// <see cref="ArticleWebSocketClient"/> or <see cref="RawArticleWebSocketClient"/>
-/// directly.
+/// The client for finlight API v3: REST (<see cref="Articles"/>, <see cref="Companies"/>,
+/// <see cref="Sources"/>) and real-time streams (<see cref="StreamAsync"/>, <see cref="RawStreamAsync"/>).
+/// Safe for concurrent use; several streams may run at once. Webhooks are verified with the static
+/// <see cref="Webhooks"/> class.
 /// </summary>
 public sealed class FinlightClient : IDisposable
 {
-    private readonly HttpClient? _ownedHttpClient;
+    /// <summary>The payload version this SDK speaks on every channel.</summary>
+    public const int PayloadVersion = 3;
 
-    /// <summary>Creates a client with default options.</summary>
+    private readonly FinlightConfig _config;
+    private readonly HttpTransport _http;
+    private readonly WsConnector _ws;
+    private readonly ILogger _log;
+    private readonly ConcurrentDictionary<StreamCore, byte> _streams = new();
+    private int _disposed;
+
+    /// <summary>Creates a client with the default settings.</summary>
+    /// <param name="apiKey">The API key (required, not empty).</param>
     public FinlightClient(string apiKey)
-        : this(new FinlightClientOptions { ApiKey = apiKey })
+        : this(new FinlightConfig { ApiKey = apiKey })
     {
     }
 
-    /// <summary>
-    /// Creates a client that owns its own <see cref="HttpClient"/>. Dispose the
-    /// client when done.
-    /// </summary>
-    public FinlightClient(FinlightClientOptions options, ILoggerFactory? loggerFactory = null)
-        : this(options, CreateOwnedHttpClient(), loggerFactory, ownsHttpClient: true)
+    /// <summary>Creates a client.</summary>
+    /// <param name="config">The settings; <see cref="FinlightConfig.ApiKey"/> is required.</param>
+    public FinlightClient(FinlightConfig config)
     {
-    }
-
-    /// <summary>
-    /// Creates a client using a caller-owned <see cref="HttpClient"/> (e.g. from
-    /// <c>IHttpClientFactory</c>). The client never disposes it. The per-attempt
-    /// timeout is enforced by this library, so prefer an HttpClient whose own
-    /// <see cref="HttpClient.Timeout"/> is not shorter than
-    /// <see cref="FinlightClientOptions.Timeout"/>.
-    /// </summary>
-    public FinlightClient(FinlightClientOptions options, HttpClient httpClient, ILoggerFactory? loggerFactory = null)
-        : this(options, httpClient, loggerFactory, ownsHttpClient: false)
-    {
-    }
-
-    private FinlightClient(
-        FinlightClientOptions options,
-        HttpClient httpClient,
-        ILoggerFactory? loggerFactory,
-        bool ownsHttpClient)
-    {
-        if (string.IsNullOrEmpty(options.ApiKey))
+        Requests.NotNull(config, "config");
+        if (string.IsNullOrWhiteSpace(config.ApiKey))
         {
-            throw new ArgumentException("finlight: FinlightClientOptions.ApiKey is required.", nameof(options));
+            throw new FinlightValidationException("FinlightConfig.ApiKey is required and must not be empty", "apiKey");
         }
 
-        _ownedHttpClient = ownsHttpClient ? httpClient : null;
-        loggerFactory ??= NullLoggerFactory.Instance;
+        Check(Uri.TryCreate(config.BaseUrl, UriKind.Absolute, out var baseUri) && baseUri.Scheme is "http" or "https", "baseUrl", "an absolute http(s) URL");
+        Check(Uri.TryCreate(config.WssUrl, UriKind.Absolute, out var wssUri) && wssUri.Scheme is "ws" or "wss", "wssUrl", "an absolute ws(s) URL");
+        Check(config.MaxPages >= 1, "maxPages", "at least 1");
+        Check(config.MaxRetries >= 0, "maxRetries", "0 or more");
+        Check(config.MaxMessageBytes >= 16L * 1024 * 1024, "maxMessageBytes", "at least 16 MiB");
+        Check(config.MaxResponseBytes > 0, "maxResponseBytes", "positive");
+        Check(config.PingInterval > TimeSpan.Zero && config.WatchdogTimeout > TimeSpan.Zero && config.RotationInterval > TimeSpan.Zero, "pingInterval", "positive intervals");
+        Check(config.SearchFailedThreshold >= 1, "searchFailedThreshold", "at least 1");
+        CheckWait(config.Timeout, "timeout", positive: true, infiniteAllowed: true);
+        CheckWait(config.ConnectTimeout, "connectTimeout", positive: true, infiniteAllowed: true);
+        if (config.TotalTimeout is { } totalTimeout)
+        {
+            CheckWait(totalTimeout, "totalTimeout", positive: true, infiniteAllowed: false);
+        }
 
-        var api = new ApiClient(options, httpClient, loggerFactory.CreateLogger<FinlightClient>());
-        Articles = new ArticleService(api);
-        Sources = new SourceService(api);
-        WebSocket = new ArticleWebSocketClient(options, wsOptions: null, loggerFactory);
-        RawWebSocket = new RawArticleWebSocketClient(options, wsOptions: null, loggerFactory);
+        CheckWait(config.RetryBaseDelay, "retryBaseDelay", positive: false);
+        CheckWait(config.RetryMaxDelay, "retryMaxDelay", positive: false);
+        CheckWait(config.BurstWait, "burstWait", positive: false);
+        CheckWait(config.PingInterval, "pingInterval", positive: true);
+        CheckWait(config.WatchdogTimeout, "watchdogTimeout", positive: true);
+        CheckWait(config.RotationInterval, "rotationInterval", positive: true);
+        CheckWait(config.ReconnectBaseDelay, "reconnectBaseDelay", positive: true);
+        CheckWait(config.ReconnectMaxDelay, "reconnectMaxDelay", positive: true);
+        CheckWait(config.LongBackoff, "longBackoff", positive: true);
+        CheckWait(config.QuotaReconnectInterval, "quotaReconnectInterval", positive: true);
+
+        _config = config;
+        _log = (config.LoggerFactory ?? NullLoggerFactory.Instance).CreateLogger("Finlight");
+        _http = new HttpTransport(config, _log);
+        _ws = new WsConnector(config.HttpClient);
+        Articles = new ArticlesService(_http);
+        Companies = new CompaniesService(_http);
+        Sources = new SourcesService(_http);
     }
 
-    /// <summary>Article search.</summary>
-    public ArticleService Articles { get; }
+    /// <summary>The SDK version (also sent as <c>x-client-version</c>).</summary>
+    public static string Version => ClientInfo.Version;
 
-    /// <summary>Source listing.</summary>
-    public SourceService Sources { get; }
+    /// <summary>Article search and lookups.</summary>
+    public ArticlesService Articles { get; }
 
-    /// <summary>Enhanced article stream, default WebSocket options.</summary>
-    public ArticleWebSocketClient WebSocket { get; }
+    /// <summary>Company master data (needs <c>entityAccess</c>).</summary>
+    public CompaniesService Companies { get; }
 
-    /// <summary>Raw article stream, default WebSocket options.</summary>
-    public RawArticleWebSocketClient RawWebSocket { get; }
+    /// <summary>The source catalog.</summary>
+    public SourcesService Sources { get; }
 
-    /// <summary>Disposes the internally created HttpClient, if any.</summary>
-    public void Dispose() => _ownedHttpClient?.Dispose();
+    /// <summary>
+    /// The enriched stream (<c>wss://wss.finlight.me</c>, <c>payloadVersion</c> 3). The parameters are
+    /// checked now; the connection opens when you start iterating. Iterate once with <c>await foreach</c>.
+    /// </summary>
+    /// <param name="parameters">The subscribe; only keys you set are sent.</param>
+    /// <param name="options">Takeover and hooks.</param>
+    /// <param name="cancellationToken">Stops the stream.</param>
+    /// <returns>The stream.</returns>
+    public FinlightStream StreamAsync(StreamParams parameters, StreamOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var subscribe = Requests.StreamSubscribe(parameters);
+        return Track(new StreamCore(_config, _log, _ws, raw: false, subscribe, options ?? new StreamOptions(), Untrack), cancellationToken);
+    }
 
-    private static HttpClient CreateOwnedHttpClient()
-        // The per-attempt timeout is enforced via CancellationToken in ApiClient;
-        // HttpClient.Timeout would race it and produce confusing exceptions.
-        => new() { Timeout = Timeout.InfiniteTimeSpan };
+    /// <summary>
+    /// The raw stream (<c>/raw</c>): articles before enrichment, skeleton only. Raw has no <c>include</c>.
+    /// </summary>
+    /// <param name="parameters">The subscribe.</param>
+    /// <param name="options">Takeover and hooks.</param>
+    /// <param name="cancellationToken">Stops the stream.</param>
+    /// <returns>The stream.</returns>
+    public FinlightStream RawStreamAsync(RawStreamParams parameters, StreamOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var subscribe = Requests.RawSubscribe(parameters);
+        return Track(new StreamCore(_config, _log, _ws, raw: true, subscribe, options ?? new StreamOptions(), Untrack), cancellationToken);
+    }
+
+    /// <summary>
+    /// Closes the client: every running stream of this client is closed (sockets with 1000, timers
+    /// stopped, its iteration ends) and the HTTP resources the SDK created are released. An injected
+    /// <see cref="HttpClient"/> stays open.
+    /// </summary>
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        foreach (var stream in _streams.Keys)
+        {
+            stream.RequestStop();
+        }
+
+        _http.Dispose();
+        _ws.Dispose();
+    }
+
+    /// <summary>Hides the API key in debug output.</summary>
+    /// <returns>A description without secrets.</returns>
+    public override string ToString() => $"FinlightClient {{ BaseUrl = {_config.BaseUrl}, Version = {Version} }}";
+
+    private FinlightStream Track(StreamCore core, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        _streams.TryAdd(core, 0);
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            // Dispose ran in between: it may have missed this stream.
+            core.RequestStop();
+        }
+
+        return new FinlightStream(core, cancellationToken);
+    }
+
+    private void Untrack(StreamCore core) => _streams.TryRemove(core, out _);
+
+    /// <summary>Durations must fit the .NET timers (about 24 days), so a bad value fails here, not in a wait.</summary>
+    private static void CheckWait(TimeSpan value, string param, bool positive, bool infiniteAllowed = false)
+    {
+        if (infiniteAllowed && value == System.Threading.Timeout.InfiniteTimeSpan)
+        {
+            return;
+        }
+
+        var ok = (positive ? value > TimeSpan.Zero : value >= TimeSpan.Zero) && value <= Limits.MaxWait;
+        Check(ok, param, (positive ? "positive" : "0 or more") + " and at most " + Limits.MaxWait.TotalDays.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " days");
+    }
+
+    private static void Check(bool ok, string param, string what)
+    {
+        if (!ok)
+        {
+            throw new FinlightValidationException($"FinlightConfig.{char.ToUpperInvariant(param[0])}{param[1..]} must be {what}", param);
+        }
+    }
 }

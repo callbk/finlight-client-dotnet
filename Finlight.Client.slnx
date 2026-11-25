@@ -5,4 +5,11 @@
   <Folder Name="/tests/">
     <Project Path="tests/Finlight.Client.Tests/Finlight.Client.Tests.csproj" />
   </Folder>
+  <Folder Name="/examples/">
+    <Project Path="examples/search/search.csproj" />
+    <Project Path="examples/search-all/search-all.csproj" />
+    <Project Path="examples/lookup/lookup.csproj" />
+    <Project Path="examples/stream/stream.csproj" />
+    <Project Path="examples/webhook-endpoint/webhook-endpoint.csproj" />
+  </Folder>
 </Solution>
