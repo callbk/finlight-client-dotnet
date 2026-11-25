@@ -69,7 +69,7 @@ public sealed class ArticlesService
         return await LookupAsync(path, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary><c>GET /v3/articles/by-link</c>: reaches every article, old ones included. A 404 is a <see cref="NotFoundException"/>.</summary>
+    /// <summary><c>GET /v3/articles/by-link</c>: same access check as the by-id lookup (custom-source grant, plan date window). A 404 is a <see cref="NotFoundException"/>.</summary>
     /// <param name="link">The article URL, exactly as stored.</param>
     /// <param name="options">Extra blocks.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
